@@ -1,0 +1,1 @@
+Fix navbar issue with smaller viewport and mobile viewport
