@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { jwtAuth } from '../lib/jwtAuth';
+import { enhancedJwtAuth } from '../lib/enhancedJwtAuth';
+import { authEventBus } from '../lib/authEvents';
+import { toast } from 'sonner';
 
 type AuthUser = { _id?: string; username: string; role_id?: number; role?: string } | null;
 type AuthContextType = {
@@ -8,6 +10,7 @@ type AuthContextType = {
   isAuthenticated: boolean;
   loading: boolean;
   login: (username: string, password: string) => Promise<boolean>;
+  loginWithGoogle: (idToken: string) => Promise<boolean>;
   logout: () => void;
 };
 
@@ -22,9 +25,12 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const init = async () => {
       try {
+        // Initialize enhanced security features
+        await enhancedJwtAuth.initializeSecurityFeatures();
+        
         // Check if user is already authenticated
-        if (jwtAuth.isAuthenticated()) {
-          const currentUser = await jwtAuth.getCurrentUser();
+        if (enhancedJwtAuth.isAuthenticated()) {
+          const currentUser = await enhancedJwtAuth.getCurrentUser();
           if (currentUser) {
             setIsAuthenticated(true);
             setUser({ 
@@ -33,57 +39,95 @@ export const AuthProvider = ({ children }) => {
               role: currentUser.role, 
               _id: currentUser.user_id 
             });
+          } else {
+            // Token exists but user verification failed - clear session
+            setIsAuthenticated(false);
+            setUser(null);
           }
         } else {
-          // Get initial token for app functionality
-          await jwtAuth.getInitialToken();
+          // Not authenticated - don't get initial token
+          // Public routes work without token, admin routes require authentication
+          setIsAuthenticated(false);
+          setUser(null);
         }
       } catch (error) {
         console.error('Auth initialization failed:', error);
+        setIsAuthenticated(false);
+        setUser(null);
       } finally {
         setLoading(false);
       }
     };
     void init();
-  }, []);
 
-  const login = async (username, password) => {
+    // Listen for session expiration events
+    const handleSessionExpired = (data: any) => {
+      setIsAuthenticated(false);
+      setUser(null);
+      toast.error('Your session has expired. Please login again.');
+      navigate('/login');
+    };
+
+    const handleLogout = () => {
+      setIsAuthenticated(false);
+      setUser(null);
+    };
+
+    authEventBus.on('session-expired', handleSessionExpired);
+    authEventBus.on('logout', handleLogout);
+
+    return () => {
+      authEventBus.off('session-expired', handleSessionExpired);
+      authEventBus.off('logout', handleLogout);
+    };
+  }, [navigate]);
+
+  const login = async (username: string, password: string) => {
     try {
-      // Use JWT auth service for login
-      await jwtAuth.login(username, password);
-      
-      // Get user info after successful login
-      const currentUser = await jwtAuth.getCurrentUser();
+      const success = await enhancedJwtAuth.login(username, password);
+      if (!success) {
+        return false;
+      }
+
+      const currentUser = await enhancedJwtAuth.getCurrentUser();
       if (currentUser) {
-        setIsAuthenticated(true);
-        setUser({ 
-          username: currentUser.sub, 
-          role_id: currentUser.role_id, 
-          role: currentUser.role, 
-          _id: currentUser.user_id 
-        });
-        
-        // Role-based navigation
-        const rid = Number(currentUser.role_id ?? 99);
-        if (rid === 3) {
-          navigate('/admin/events');
-        } else if (rid === 4) {
-          navigate('/admin/bookings');
-        } else {
-          navigate('/admin');
-        }
+        finishLoginWithUser(currentUser);
         return true;
       }
-      return false;
+
+      throw new Error('Unable to retrieve user profile after login');
     } catch (error) {
       console.error('Login failed:', error);
-      return false;
+      throw error;
     }
+  };
+
+  const finishLoginWithUser = (currentUser: any) => {
+    setIsAuthenticated(true);
+    setUser({ 
+      username: currentUser.sub, 
+      role_id: currentUser.role_id, 
+      role: currentUser.role, 
+      _id: currentUser.user_id 
+    });
+    const rid = Number(currentUser.role_id ?? 99);
+    if (rid === 3) {
+      navigate('/admin/events');
+    } else if (rid === 4) {
+      navigate('/admin/bookings');
+    } else {
+      navigate('/admin');
+    }
+  };
+
+  const loginWithGoogle = async (idToken: string) => {
+    console.error('Google login disabled');
+    return false;
   };
 
   const logout = async () => {
     try {
-      await jwtAuth.logout();
+      await enhancedJwtAuth.logout();
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
@@ -98,6 +142,7 @@ export const AuthProvider = ({ children }) => {
     isAuthenticated,
     loading,
     login,
+    loginWithGoogle,
     logout,
   };
 

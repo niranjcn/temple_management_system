@@ -1,14 +1,53 @@
 version: '3.8'
 
 services:
-  backend:
+  # Public API Service - User-facing operations
+  backend-public:
     build:
-      context: ./backend
+      context: ./backend-public
+      dockerfile: Dockerfile.local
+    container_name: temple-public-api
     ports:
-      - "8080:8000"
+      - "8080:8000"  # Public API on port 8080
     volumes:
-      - ./backend:/app
-    environment:
-      MONGODB_URL: mongodb+srv://codnoxdev_db_user:LRbvzDD2AbLodP0G@cluster0.je8cht0.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
-      DATABASE_NAME: temple_db
-      USE_MINIO: "false"
+      - ./backend-public:/app
+      - /app/__pycache__  # Exclude pycache from volume
+    env_file:
+      - ./backend-public/.env
+    networks:
+      - temple-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Admin API Service - Administrative operations
+  backend-admin:
+    build:
+      context: ./backend-admin
+      dockerfile: Dockerfile.local
+    container_name: temple-admin-api
+    ports:
+      - "8081:8000"  # Admin API on port 8081
+    volumes:
+      - ./backend-admin:/app
+      - ./backend-admin/profile:/app/profile  # Mount profile directory
+      - /app/__pycache__  # Exclude pycache from volume
+    env_file:
+      - ./backend-admin/.env
+    networks:
+      - temple-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  temple-network:
+    driver: bridge
+
+

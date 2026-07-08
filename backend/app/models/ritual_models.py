@@ -27,6 +27,19 @@ class AvailableRitualBase(BaseModel):
     # Date range for availability - using string format to avoid MongoDB serialization issues
     available_from: Optional[str] = Field(None, example="2023-01-01")
     available_to: Optional[str] = Field(None, example="2023-12-31")
+    # Whether this ritual should be shown on the home RitualSection (max 3 allowed)
+    show_on_home: Optional[bool] = Field(False, example=False)
+    
+    # Nakshatrapooja special fields
+    is_nakshatrapooja: Optional[bool] = Field(False, example=False)
+    nakshatrapooja_color: Optional[str] = Field(None, example="#FF6B35")  # Custom color for Nakshatrapooja
+    
+    # Sync tracking fields
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    synced_at: Optional[datetime] = Field(None)
+    sync_origin: Optional[str] = Field(default="local")  # "local" or "remote"
+    sync_status: Optional[str] = Field(default="pending")  # "synced", "pending", "conflict"
 
     @field_validator('available_from', 'available_to')
     @classmethod
@@ -59,3 +72,9 @@ class RitualInstance(BaseModel):
     dob: str = Field(...)
     subscription: str = Field(...)
     quantity: int = Field(...)
+    # Nakshatrapooja specific fields
+    date_range_type: Optional[str] = Field(None, example="this_month")  # this_month, this_year, custom_range
+    custom_range_start: Optional[str] = Field(None, example="2025-01-01")
+    custom_range_end: Optional[str] = Field(None, example="2025-12-31")
+    calculated_date: Optional[str] = Field(None, example="2025-10-25")  # Single date for this_month or custom_range
+    calculated_dates: Optional[List[str]] = Field(None, example=["2025-01-15", "2025-02-12", "..."])  # All dates for this_year (12 months)

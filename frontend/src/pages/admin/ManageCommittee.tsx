@@ -13,6 +13,7 @@ import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@
 import { Trash2, Edit, Plus, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { resolveImageUrl } from '@/lib/utils';
+import { requestSignedUpload, uploadFileToCloudinary } from '@/lib/cloudinary';
 
 interface CommitteeMember {
     _id: string;
@@ -127,16 +128,28 @@ const ManageCommittee = () => {
             setUploading(true);
             setUploadError(null);
             try {
-                const formDataUpload = new FormData();
-                formDataUpload.append('file', selectedFile);
+                const signed = await requestSignedUpload('/committee/get_signed_upload', selectedFile);
 
-                const response = await post<{ path: string; url: string }, FormData>('/committee/upload', formDataUpload, {
-                    headers: { 'Content-Type': 'multipart/form-data' },
-                });
+                if (selectedFile.size > signed.max_file_bytes) {
+                    throw new Error('Image exceeds the 2 MB limit.');
+                }
 
-                imageUrl = response.path;
+                const cloudinaryResult = await uploadFileToCloudinary(signed, selectedFile);
+
+                const finalizePayload = {
+                    object_path: signed.object_path,
+                    public_id: cloudinaryResult.public_id,
+                    secure_url: cloudinaryResult.secure_url,
+                    format: cloudinaryResult.format,
+                    bytes: cloudinaryResult.bytes,
+                    version: cloudinaryResult.version ? String(cloudinaryResult.version) : undefined,
+                };
+
+                const finalizeResponse = await post<{ public_url: string }, typeof finalizePayload>('/committee/finalize_upload', finalizePayload);
+                imageUrl = finalizeResponse.public_url;
                 toast.success('Image uploaded successfully!');
             } catch (error) {
+                console.error('Committee image upload failed:', error);
                 setUploadError('Failed to upload image.');
                 toast.error('Failed to upload image.');
                 setUploading(false);
@@ -556,7 +569,7 @@ const OrderConfigurator = ({ type, members, onSave }: {
     return (
         <div className="space-y-6">
             <div className="text-sm text-muted-foreground">
-                {isPreview ? 'Assign 1-7 for homepage preview. Leave blank to exclude (null).' : 'Assign numbers for full members page. Leave blank to send to the end (null).'}
+                {isPreview ? 'Assign 1-7 for homepage preview. Leave blank to exclude (null).' : 'Drag and drop cards below to reorder them on the public members page.'}
             </div>
             {isPreview ? (
                 <div>
@@ -575,10 +588,8 @@ const OrderConfigurator = ({ type, members, onSave }: {
                 </div>
             ) : (
                 (() => {
-                    const featured = sorted[0];
+                    const featured = sorted.length > 0 ? sorted[0] : null;
                     const rest = sorted.slice(1);
-                    const rows: typeof rest[] = [];
-                    for (let i = 0; i < rest.length; i += 5) rows.push(rest.slice(i, i + 5));
                     return (
                         <div className="space-y-8">
                             {featured && (
@@ -607,18 +618,18 @@ const OrderConfigurator = ({ type, members, onSave }: {
                                     </div>
                                 </div>
                             )}
-                            {rows.map((row, idx) => (
-                                <div key={idx} className="flex justify-center gap-6 flex-wrap">
-                                    {row.map(m => (
+                            {rest.length > 0 && (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 justify-items-center">
+                                    {rest.map(m => (
                                         <div
                                             key={m._id}
                                             draggable
                                             onDragStart={onDragStartCard(m._id)}
                                             onDragOver={onDragOverCard}
                                             onDrop={onDropOnCard(m._id)}
-                                            className="cursor-move"
+                                            className="cursor-move w-full max-w-xs"
                                         >
-                                            <Card className="overflow-hidden card-divine w-64">
+                                            <Card className="overflow-hidden card-divine w-full">
                                                 {m.image && (
                                                     <div className="flex justify-center mt-6">
                                                         <img src={resolveImageUrl(m.image)} alt={m.name} className="w-24 h-24 object-cover rounded-full border-4 border-primary/20" />
@@ -635,7 +646,7 @@ const OrderConfigurator = ({ type, members, onSave }: {
                                         </div>
                                     ))}
                                 </div>
-                            ))}
+                            )}
                         </div>
                     );
                 })()

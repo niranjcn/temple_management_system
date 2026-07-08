@@ -17,6 +17,11 @@ class CalendarDayBase(BaseModel):
     updated_by: Optional[str] = None
     version: int = 0
     schema_version: int = 1
+    
+    # Sync tracking fields
+    synced_at: Optional[datetime] = Field(None)
+    sync_origin: Optional[str] = Field(default="local")  # "local" or "remote"
+    sync_status: Optional[str] = Field(default="pending")  # "synced", "pending", "conflict"
 
     @field_validator("dateISO")
     @classmethod

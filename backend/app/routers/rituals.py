@@ -17,6 +17,14 @@ async def list_available_rituals():
     rituals = await ritual_service.get_all_available_rituals()
     return rituals
 
+@router.get("/featured", response_description="List featured rituals for home (max 3)", response_model=List[AvailableRitualInDB])
+async def list_featured_rituals():
+    """
+    Used to retrieve up to 3 rituals flagged to be shown on home. Date filtering applies too.
+    """
+    rituals = await ritual_service.get_featured_rituals_for_home()
+    return rituals
+
 @router.get("/admin", response_description="List all rituals for admin", response_model=List[AvailableRitualInDB])
 async def list_all_rituals_admin(current_admin: dict = Depends(auth_service.get_current_admin)):
     """
@@ -25,6 +33,15 @@ async def list_all_rituals_admin(current_admin: dict = Depends(auth_service.get_
     if int(current_admin.get("role_id", 99)) > 4:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view all rituals")
     rituals = await ritual_service.get_all_available_rituals_admin()
+    return rituals
+
+@router.get("/all", response_description="List all rituals (no date filtering)", response_model=List[AvailableRitualInDB])
+async def list_all_rituals_public():
+    """
+    Public endpoint for clients (e.g., booking page) to fetch all rituals without
+    date filtering. Employee-only filtering (if required) should be handled client-side.
+    """
+    rituals = await ritual_service.get_all_public_rituals_no_date()
     return rituals
 
 @router.post("", response_description="Add new ritual", response_model=AvailableRitualInDB, status_code=status.HTTP_201_CREATED)
@@ -37,7 +54,10 @@ async def create_new_ritual(
     """
     if int(current_admin.get("role_id", 99)) > 4:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to create rituals")
-    created_ritual = await ritual_service.create_ritual(ritual)
+    try:
+        created_ritual = await ritual_service.create_ritual(ritual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if created_ritual:
         # Log activity
         activity = ActivityCreate(
@@ -61,7 +81,10 @@ async def update_ritual(
     """
     if int(current_admin.get("role_id", 99)) > 4:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update rituals")
-    updated_ritual = await ritual_service.update_ritual_by_id(id, ritual.model_dump())
+    try:
+        updated_ritual = await ritual_service.update_ritual_by_id(id, ritual.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if updated_ritual is not None:
         # Log activity
         activity = ActivityCreate(

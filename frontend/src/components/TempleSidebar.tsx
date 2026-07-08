@@ -16,7 +16,11 @@ import {
   BarChart3,
   Plus,
   Activity,
-  ShoppingCart
+  ShoppingCart,
+  Database,
+  UserCheck,
+  FileText,
+  MapPin
 } from 'lucide-react';
 
 type SidebarProps = { isOpen?: boolean; onToggle?: () => void };
@@ -27,6 +31,7 @@ const TempleSidebar: React.FC<SidebarProps> = ({ isOpen = false, onToggle }) => 
 
   const [isWebsiteExpanded, setIsWebsiteExpanded] = useState(true);
   const [isStockExpanded, setIsStockExpanded] = useState(true);
+  const [isPriestAttendanceExpanded, setIsPriestAttendanceExpanded] = useState(true);
   const [isAdminExpanded, setIsAdminExpanded] = useState(true);
   
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -182,6 +187,40 @@ const TempleSidebar: React.FC<SidebarProps> = ({ isOpen = false, onToggle }) => 
         </div>
         )}
 
+        {/* Priest Attendance Section: visible for all admin users */}
+        <div>
+          <button
+            onClick={() => setIsPriestAttendanceExpanded(!isPriestAttendanceExpanded)}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-md text-neutral-600 hover:bg-orange-50 hover:text-orange-600 transition-colors text-sm font-medium"
+          >
+            <div className="flex items-center space-x-3">
+              <UserCheck className="h-5 w-5" />
+              <span className="font-medium">Priest Attendance</span>
+            </div>
+            {isPriestAttendanceExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </button>
+          
+          {isPriestAttendanceExpanded && (
+             <div className="ml-6 mt-2 space-y-1">
+                <NavLink to="/admin/priest-management" className={subNavLinkClass}>
+                    <Users className="h-4 w-4" />
+                    <span>Priest Management</span>
+                </NavLink>
+                <NavLink to="/admin/attendance-report" className={subNavLinkClass}>
+                    <FileText className="h-4 w-4" />
+                    <span>Attendance Report</span>
+                </NavLink>
+                {/* Location Management: Only visible to Super Admin (role_id === 0) */}
+                {roleId === 0 && (
+                  <NavLink to="/admin/location-management" className={subNavLinkClass}>
+                    <MapPin className="h-4 w-4" />
+                    <span>Location Management</span>
+                  </NavLink>
+                )}
+             </div>
+          )}
+        </div>
+
         {/* Admin Management Section */}
         {/* Admin Management visible only to role_id <= 2 (Super/Admin/Privileged), but page will also gate */}
         {roleId <= 2 && (
@@ -207,6 +246,18 @@ const TempleSidebar: React.FC<SidebarProps> = ({ isOpen = false, onToggle }) => 
                 <NavLink to="/admin/activity" className={subNavLinkClass}>
                     <Activity className="h-4 w-4" />
                     <span>Activity Log</span>
+                </NavLink>
+                )}
+                {roleId <= 1 && (
+                <NavLink to="/admin/security" className={subNavLinkClass}>
+                    <Shield className="h-4 w-4" />
+                    <span>Security Overview</span>
+                </NavLink>
+                )}
+                {roleId <= 1 && (
+                <NavLink to="/admin/backup" className={subNavLinkClass}>
+                    <Database className="h-4 w-4" />
+                    <span>Backup Management</span>
                 </NavLink>
                 )}
             </div>

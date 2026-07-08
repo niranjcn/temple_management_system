@@ -11,6 +11,8 @@ import Footer from '@/components/Footer';
 import ContactSection from '@/components/ContactSection';
 import ScrollToTop from '@/components/ScrollToTop';
 import ScrollProgress from '@/components/ScrollProgress';
+import TempleSectionFrame from '@/components/TempleSectionFrame';
+import GoldenDivider from '../components/GoldenDivider';
 
 const Index = () => {
   const location = useLocation() as any;
@@ -26,7 +28,7 @@ const Index = () => {
     }
   }, [location.state]);
   return (
-    <div className="min-h-screen overflow-x-hidden no-scrollbar">
+  <div className="min-h-screen overflow-x-hidden no-scrollbar temple-canvas">
       <ScrollProgress />
       <Navigation />
       {fromAdmin && (
@@ -38,31 +40,33 @@ const Index = () => {
           </Link>
         </div>
       )}
-  <main className="overflow-x-hidden">
-        {/* Each component is wrapped in a div with an ID that matches the Navigation component's links */}
+  <main className="overflow-x-hidden golden-text-scheme">
         <div id="home" className="scroll-offset">
           <HeroSection />
         </div>
-        <div id="about" className="scroll-offset">
+        <TempleSectionFrame id="about" background="transparent" className="transparent-bg" accent seamless>
           <TempleOverview />
-        </div>
-        <div id="rituals" className="scroll-offset">
+        </TempleSectionFrame>
+        <GoldenDivider />
+        <TempleSectionFrame id="rituals" background="transparent" className="transparent-bg" accent seamless>
           <RitualSection />
-        </div>
-        <div id="events" className="scroll-offset">
+        </TempleSectionFrame>
+        <GoldenDivider subtle />
+        <TempleSectionFrame id="events" background="transparent" className="transparent-bg" seamless>
           <EventSection />
-        </div>
-        <div id="gallery" className="scroll-offset">
+        </TempleSectionFrame>
+        <GoldenDivider />
+        <TempleSectionFrame id="gallery" background="transparent" className="transparent-bg" accent seamless>
           <GalleryPreview />
-        </div>
-        <div id="committee" className="scroll-offset">
+        </TempleSectionFrame>
+        <GoldenDivider subtle />
+        <TempleSectionFrame id="committee" background="transparent" className="transparent-bg" seamless>
           <CommitteeSection />
-        </div>
-        
-        {/* ContactSection already contains the id="contact", add wrapper to ensure scroll offset */}
-        <div id="contact" className="scroll-offset">
+        </TempleSectionFrame>
+        <GoldenDivider />
+        <TempleSectionFrame id="contact" background="transparent" className="transparent-bg" accent seamless>
           <ContactSection />
-        </div>
+        </TempleSectionFrame>
       </main>
       <Footer />
       <ScrollToTop />

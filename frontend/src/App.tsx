@@ -2,11 +2,13 @@ import { Toaster } from "./components/ui/sonner";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import Index from "./pages/Index";
+import Index from "./pages/Index"; // retained for internal reuse
+import HomePage from "./pages/HomePage";
 import AboutTemple from "./pages/AboutTemple";
 import CommitteeMembers from "./pages/CommitteeMembers";
 import NotFound from "./pages/NotFound";
 import RitualBooking from "./pages/RitualBooking";
+import RitualBrowsing from "./pages/RitualBrowsing";
 import EventDetails from "./pages/EventDetails";
 import FullEvents from "./pages/FullEvents";
 import FullGallery from "./pages/FullGallery";
@@ -28,6 +30,11 @@ import EditProfile from "./pages/admin/EditProfile";
 import Activity from "./pages/admin/Activity";
 import EmployeeBooking from "./pages/admin/EmployeeBooking"; // <-- add
 import ManageCommittee from "./pages/admin/ManageCommittee";
+import BackupManagement from "./pages/admin/BackupManagement";
+import SecurityDashboard from "./pages/admin/SecurityDashboard";
+import PriestManagement from "./pages/admin/PriestManagement";
+import AttendanceReport from "./pages/admin/AttendanceReport";
+import LocationManagement from "./pages/admin/LocationManagement";
 
 const queryClient = new QueryClient();
 
@@ -58,8 +65,10 @@ const App = () => (
         <AuthProvider>
           <Routes>
             {/* Public Routes */}
-            <Route path="/" element={<Index />} />
+            {/* Home with entrance door animation wrapper */}
+            <Route path="/" element={<HomePage />} />
             <Route path="/ritual-booking" element={<RitualBooking />} />
+            <Route path="/ritual-browsing" element={<RitualBrowsing />} />
             <Route path="/about" element={<AboutTemple />} />
             <Route path="/committee" element={<CommitteeMembers />} />
             <Route path="/events" element={<FullEvents />} />
@@ -138,10 +147,35 @@ const App = () => (
                 </RoleGuard>
               } />
 
+              {/* Backup Management visible only to role_id <= 1 (Super/Admin) */}
+              <Route path="backup" element={
+                <RoleGuard allow={(rid) => (rid ?? 99) <= 1}>
+                  <BackupManagement />
+                </RoleGuard>
+              } />
+
+              {/* Security Overview visible only to role_id <= 1 (Super/Admin) */}
+              <Route path="security" element={
+                <RoleGuard allow={(rid) => (rid ?? 99) <= 1}>
+                  <SecurityDashboard />
+                </RoleGuard>
+              } />
+
               {/* Committee Management visible only to role_id <= 1 (Super/Admin) */}
               <Route path="committee" element={
                 <RoleGuard allow={(rid) => (rid ?? 99) <= 1}>
                   <ManageCommittee />
+                </RoleGuard>
+              } />
+
+              {/* Priest Attendance Management: Accessible to all admin users */}
+              <Route path="priest-management" element={<PriestManagement />} />
+              <Route path="attendance-report" element={<AttendanceReport />} />
+
+              {/* Location Management: Only Super Admins (role_id === 0) */}
+              <Route path="location-management" element={
+                <RoleGuard allow={(rid) => rid === 0}>
+                  <LocationManagement />
                 </RoleGuard>
               } />
 

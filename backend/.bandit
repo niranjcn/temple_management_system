@@ -1,0 +1,27 @@
+# Bandit Configuration File
+# This file configures the Bandit security scanner for the Temple Management System
+
+[bandit]
+# Exclude test files and third-party code
+exclude_dirs = [
+    '/test',
+    '/tests',
+    '/__pycache__',
+    '/node_modules',
+    '/venv',
+    '/env',
+    '/.venv',
+    '/sqlmap',
+    '/frontend/node_modules'
+]
+
+# Test IDs to skip (with justification)
+# B106: Hardcoded password function argument - False positive for token_type parameters
+# B608: SQL injection in MongoDB operations - False positive (using PyMongo, not SQL)
+skips = ['B106', 'B608']
+
+# Severity levels to report (LOW, MEDIUM, HIGH)
+level = MEDIUM
+
+# Confidence levels to report (LOW, MEDIUM, HIGH)
+confidence = MEDIUM

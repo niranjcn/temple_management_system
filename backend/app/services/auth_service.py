@@ -1,53 +1,15 @@
-import os
-from dotenv import load_dotenv
-from passlib.context import CryptContext
-from datetime import datetime, timedelta, timezone
-from typing import Optional
-import jwt
-from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from ..database import admins_collection
 from .jwt_security_service import jwt_security
-from ..models import AdminCreate
+from ..models.admin_models import AdminInDB, AdminCreate
+from bson import ObjectId
+from datetime import datetime
+import bcrypt
+from typing import Optional
 
-# Load environment variables from .env file
-load_dotenv()
-
-# --- Configuration ---
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
-
-# --- Error Handling for Missing Secret Key ---
-if not SECRET_KEY:
-    raise ValueError("No SECRET_KEY set for JWT. Please set it in your .env file.")
-
-# --- Password Hashing ---
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Token URL is only used for docs; actual tokens are issued under /api/auth
+# Token URL is only used for docs; tokens are issued under /api/auth
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-
-def verify_password(plain_password, hashed_password):
-    """Verifies a plain password against a hashed password."""
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
-    """Hashes a plain password."""
-    return pwd_context.hash(password)
-
-# --- JWT Token ---
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    """Creates a new JWT access token."""
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
 
 # --- Admin Database Operations ---
 async def create_admin(admin: AdminCreate):
@@ -57,22 +19,64 @@ async def create_admin(admin: AdminCreate):
     and inserts it into the admins_collection.
     """
     admin_data = admin.model_dump()
+    if not admin_data.get("hashed_password"):
+        raise ValueError("hashed_password is required when creating an admin user")
     result = await admins_collection.insert_one(admin_data)
     new_admin = await admins_collection.find_one({"_id": result.inserted_id})
     return new_admin
+
+
+def hash_password(password: str) -> str:
+    """Hash a plain text password using bcrypt."""
+    if not password or not isinstance(password, str):
+        raise ValueError("Password must be a non-empty string")
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(plain_password: str, hashed_password: Optional[str]) -> bool:
+    """Safely verify a password against its bcrypt hash."""
+    if not plain_password or not hashed_password:
+        return False
+    try:
+        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    except ValueError:
+        # Occurs if hash is malformed
+        return False
+
+
+async def authenticate_admin(username: str, password: str) -> Optional[dict]:
+    """Authenticate admin by username/password, returning admin document on success."""
+    admin = await get_admin_by_username(username)
+    if not admin:
+        return None
+    if not verify_password(password, admin.get("hashed_password")):
+        return None
+    return admin
 
 async def get_admin_by_username(username: str):
     """Fetches a single admin user from the database by username."""
     return await admins_collection.find_one({"username": username})
 
-async def authenticate_admin(username: str, password: str):
-    """Authenticate admin user with username and password."""
-    admin = await get_admin_by_username(username)
-    if not admin:
-        return False
-    if not verify_password(password, admin.get("hashed_password", "")):
-        return False
-    return admin
+async def get_admin_by_mobile(mobile_number: str):
+    """Fetch admin by mobile number (full number with country code)."""
+    # Try to find admin where mobile_prefix + mobile_number equals the provided mobile_number
+    return await admins_collection.find_one({
+        "$expr": {
+            "$eq": [
+                {"$concat": ["$mobile_prefix", {"$toString": "$mobile_number"}]},
+                mobile_number
+            ]
+        }
+    })
+
+async def update_last_login(admin_id: str):
+    """
+    Update the last login timestamp for the admin user.
+    """
+    await admins_collection.update_one(
+        {"_id": ObjectId(admin_id)},
+        {"$set": {"last_login": datetime.utcnow()}}
+    )
 
 # --- Dependency for protected routes ---
 async def get_current_admin(request: Request, token: str = Depends(oauth2_scheme)):
@@ -109,3 +113,16 @@ async def get_current_admin(request: Request, token: str = Depends(oauth2_scheme
     if admin is None:
         raise credentials_exception
     return admin
+
+
+async def get_current_user_with_admin_role(request: Request, token: str = Depends(oauth2_scheme)) -> AdminInDB:
+    """
+    Get current admin user and return as AdminInDB model.
+    This is used for sync endpoints that require admin authentication.
+    """
+    # Get the admin dict using existing function
+    admin_dict = await get_current_admin(request, token)
+    
+    # Convert to AdminInDB model
+    admin_db = AdminInDB(**admin_dict)
+    return admin_db

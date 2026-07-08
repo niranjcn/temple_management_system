@@ -14,6 +14,10 @@ interface GalleryImage {
 	category: string;
 }
 
+/**
+ * Fetches gallery images from the API.
+ * @returns {Promise<GalleryImage[]>} A promise that resolves to an array of gallery images.
+ */
 const fetchGalleryImages = () => get<GalleryImage[]>('/gallery/');
 
 
@@ -25,14 +29,12 @@ const GalleryPreview = () => {
 	});
 	const imagesById = useMemo(() => Object.fromEntries((galleryImages || []).map(i => [i._id, i])), [galleryImages]);
 
-	// Read-only six-slot configuration loaded from backend
 	const { data: homeConfig } = useQuery<{ _id?: string; slots: (string | null)[] }>({
 		queryKey: ['galleryHomePreview'],
 		queryFn: async () => {
 			try {
 				return await get<{ _id?: string; slots: (string | null)[] }>('/gallery-home-preview/');
 			} catch (e) {
-				// If not configured, default to empty slots; page will show blanks
 				return { slots: [null, null, null, null, null, null] };
 			}
 		},
@@ -49,7 +51,7 @@ const GalleryPreview = () => {
 		const img = slotImage(idx);
 		const base = size === 'lg' ? 'h-72 md:h-[420px]' : size === 'md' ? 'h-48 md:h-52' : 'h-40';
 		return (
-			<div className={`relative rounded-lg overflow-hidden border-2 border-primary/30 bg-slate-900/20 ${base}`}>
+			<div className={`relative rounded-lg overflow-hidden border-2 border-primary/30 bg-transparent ${base}`}>
 				{img ? (
 					<ImageWithBlur
 						src={resolveImageUrl(img.src)}
@@ -73,57 +75,61 @@ const GalleryPreview = () => {
 	const { ref: bottomRef, isVisible: bottomVisible } = useScrollAnimation();
 
 	return (
-		<section className="py-20 bg-background">
-			<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-				{/* Section Header */}
-				<div ref={headerRef} className={`text-center mb-16 ${headerVisible ? 'animate-fade-in-up' : ''}`}>
-					<h2 className="text-4xl md:text-5xl font-playfair font-bold mb-6 text-foreground">
-						Sacred <span className="text-primary">Gallery</span>
-					</h2>
-					<p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-						Witness the divine beauty and spiritual moments captured during our
-						ceremonies, festivals, and daily temple activities.
-					</p>
-				</div>
-
-				{/* Gallery fixed slots with drag-and-drop */}
-				{isLoading && <p className="text-center">Loading gallery...</p>}
-				{isError && <p className="text-center text-red-500">Error loading gallery.</p>}
-				{!isLoading && !isError && (
-					<div className="space-y-6">
-						{/* Top area: 1 large + 2 medium */}
-						<div ref={topRef} className="grid grid-cols-1 md:grid-cols-3 gap-6">
-							<div className={`md:col-span-2 ${topVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0s'}}>
-								<Slot idx={0} size="lg" />
-							</div>
-							<div className="space-y-6">
-								<div className={`${topVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0.15s'}}>
-									<Slot idx={1} size="md" />
-								</div>
-								<div className={`${topVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0.3s'}}>
-									<Slot idx={2} size="md" />
-								</div>
-							</div>
-						</div>
-						{/* Bottom area: 3 small centered */}
-						<div ref={bottomRef} className="flex flex-wrap items-stretch justify-center gap-6">
-							<div className={`w-full md:w-auto md:flex-1 md:max-w-sm ${bottomVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0s'}}><Slot idx={3} size="sm" /></div>
-							<div className={`w-full md:w-auto md:flex-1 md:max-w-sm ${bottomVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0.15s'}}><Slot idx={4} size="sm" /></div>
-							<div className={`w-full md:w-auto md:flex-1 md:max-w-sm ${bottomVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0.3s'}}><Slot idx={5} size="sm" /></div>
-						</div>
-
-						{/* Read-only: no drag-and-drop palette in public preview */}
+		// 1. Main wrapper with reduced vertical space
+	    <section className="py-10 px-6">
+		    {/* 2. The visible outline container - replaced red debug border with temple frame */}
+		    <div className="max-w-screen-2xl mx-auto bg-transparent rounded-xl p-6 sm:p-8 lg:p-12 temple-section-frame transparent-bg">
+				{/* 3. The content container */}
+				<div className="max-w-7xl mx-auto">
+					
+					{/* Section Header */}
+					<div ref={headerRef} className={`text-center mb-16 ${headerVisible ? 'animate-fade-in-up' : ''}`}>
+						<h2 className="temple-heading-xl">Sacred <span className="sub">Gallery</span></h2>
+						<div className="temple-heading-divider" />
+						<p className="mt-6 text-amber-900/90 text-lg leading-relaxed max-w-3xl mx-auto">
+							Witness the divine beauty and spiritual moments captured during our
+							ceremonies, festivals, and daily temple activities.
+						</p>
 					</div>
-				)}
-				{/* CTA */}
-				<div className="text-center mt-12">
-					<Link
-						to="/gallery"
-						className="btn-divine inline-flex items-center gap-2"
-					>
-						<Camera className="h-5 w-5" />
-						View Complete Gallery
-					</Link>
+
+					{/* Gallery fixed slots */}
+					{isLoading && <p className="text-center">Loading gallery...</p>}
+					{isError && <p className="text-center text-red-500">Error loading gallery.</p>}
+					{!isLoading && !isError && (
+						<div className="space-y-6 max-h-[70vh] overflow-y-auto md:max-h-none md:overflow-visible pr-2 md:pr-0">
+							{/* Top area: 1 large + 2 medium */}
+							<div ref={topRef} className="grid grid-cols-1 md:grid-cols-3 gap-6">
+								<div className={`md:col-span-2 ${topVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0s'}}>
+									<Slot idx={0} size="lg" />
+								</div>
+								<div className="space-y-6">
+									<div className={`${topVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0.15s'}}>
+										<Slot idx={1} size="md" />
+									</div>
+									<div className={`${topVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0.3s'}}>
+										<Slot idx={2} size="md" />
+									</div>
+								</div>
+							</div>
+							{/* Bottom area: 3 small centered */}
+							<div ref={bottomRef} className="flex flex-wrap items-stretch justify-center gap-6">
+								<div className={`w-full md:w-auto md:flex-1 md:max-w-sm ${bottomVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0s'}}><Slot idx={3} size="sm" /></div>
+								<div className={`w-full md:w-auto md:flex-1 md:max-w-sm ${bottomVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0.15s'}}><Slot idx={4} size="sm" /></div>
+								<div className={`w-full md:w-auto md:flex-1 md:max-w-sm ${bottomVisible ? 'animate-scale-in' : ''}`} style={{animationDelay: '0.3s'}}><Slot idx={5} size="sm" /></div>
+							</div>
+						</div>
+					)}
+					{/* CTA */}
+					<div className="text-center mt-12">
+						<Link
+							to="/gallery"
+							className="btn-divine inline-flex items-center gap-2"
+						>
+							<Camera className="h-5 w-5" />
+							View Complete Gallery
+						</Link>
+					</div>
+					
 				</div>
 			</div>
 		</section>
@@ -131,4 +137,3 @@ const GalleryPreview = () => {
 };
 
 export default GalleryPreview;
-

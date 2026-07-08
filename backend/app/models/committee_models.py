@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from bson import ObjectId
 from .main_models import PyObjectId
+from datetime import datetime
 
 # --- Schema for Committee Members ---
 class CommitteeMemberBase(BaseModel):
@@ -17,6 +18,13 @@ class CommitteeMemberBase(BaseModel):
     view_order: Optional[int] = Field(default=None, ge=1)
     # Image will be a backend-served URL (e.g., /api/committee/files/<object_path>)
     image: str = Field(default="", example="/api/committee/files/2025-01-01_12-00-00_000000/photo.jpg")
+    
+    # Sync tracking fields
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    synced_at: Optional[datetime] = Field(None)
+    sync_origin: Optional[str] = Field(default="local")  # "local" or "remote"
+    sync_status: Optional[str] = Field(default="pending")  # "synced", "pending", "conflict"
 
 class CommitteeMemberCreate(CommitteeMemberBase):
     pass

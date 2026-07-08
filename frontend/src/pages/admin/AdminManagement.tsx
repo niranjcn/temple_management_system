@@ -44,6 +44,7 @@ interface Admin {
   _id: string;
   name: string;
   email: string;
+  google_email?: string;
   username: string;
   mobile_prefix: string;
   mobile_number: number;
@@ -63,14 +64,12 @@ interface Admin {
   last_profile_update?: string;
 }
 
-interface AdminCreationPayload extends Omit<Admin, '_id' | 'created_at' | 'last_login'> {
-    hashed_password?: string;
-    password?: string;
-}
+interface AdminCreationPayload extends Omit<Admin, '_id' | 'created_at' | 'last_login'> {}
 
 interface AdminUpdatePayload {
   name?: string;
   email?: string;
+  google_email?: string;
   username?: string;
   role?: string;
   role_id?: number;
@@ -82,7 +81,6 @@ interface AdminUpdatePayload {
   dob?: string;
   notification_preference?: string[];
   notification_list?: string[];
-  hashed_password?: string; // plain password placed here; backend will hash
 }
 
 // --- API Fetching ---
@@ -149,7 +147,7 @@ const AdminManagement = () => {
 
       {/* Admin Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <StatCard icon={Users} title="Total Admins" value={totalAdmins} color="blue" />
+        <StatCard icon={Users} title="Total Admins" value={totalAdmins} color="indigo" />
         <StatCard icon={CheckCircle} title="Active Admins" value={activeAdmins} color="green" />
         <StatCard icon={Shield} title="Permission Types" value={permissionCount} color="purple" />
       </div>
@@ -217,11 +215,22 @@ const StatCard = ({ icon: Icon, title, value, color }: { icon: React.ElementType
 const AdminRow = ({ admin, roles }: { admin: Admin, roles: Role[] }) => {
   const queryClient = useQueryClient();
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
+  const [modalEditing, setModalEditing] = useState(false);
+  const [snapshot, setSnapshot] = useState<{ name: string; username: string; email: string; mobile_prefix: string; mobile_number: string; dob: string } | null>(null);
+  // Password change dialog state
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [superAdminPassword, setSuperAdminPassword] = useState('');
   // inline edit states
   const [editingEmail, setEditingEmail] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [editingUsername, setEditingUsername] = useState(false);
   const [editingPhone, setEditingPhone] = useState(false);
   const [editingDob, setEditingDob] = useState(false);
   const [emailValue, setEmailValue] = useState(admin.email);
+  const [nameValue, setNameValue] = useState(admin.name);
+  const [usernameValue, setUsernameValue] = useState(admin.username);
   const [prefixValue, setPrefixValue] = useState(admin.mobile_prefix);
   const [mobileValue, setMobileValue] = useState(String(admin.mobile_number ?? ''));
   const [dobValue, setDobValue] = useState(admin.dob || '');
@@ -229,15 +238,23 @@ const AdminRow = ({ admin, roles }: { admin: Admin, roles: Role[] }) => {
   const myRoleId: number = user?.role_id ?? 99;
   const myId: string | undefined = user?._id;
   const isSuperAdmin = admin.role_id === 0;
-  const canModify = !isSuperAdmin && myRoleId < admin.role_id && !(myRoleId >= 2 && myId && admin._id === myId);
+  const isCurrentUserSuperAdmin = myRoleId === 0;
+  // Align with backend: cannot modify Super Admin, must have strictly lower role_id, and no self-mod for any non-super user
+  const canModify = !isSuperAdmin && myRoleId < admin.role_id && !(myId && admin._id === myId && myRoleId >= 1);
 
   // Effect to reset inline edit states when dialog is closed
   useEffect(() => {
     if (!isProfileDialogOpen) {
+      setModalEditing(false);
+      setSnapshot(null);
       setEditingEmail(false);
+      setEditingName(false);
+      setEditingUsername(false);
       setEditingPhone(false);
       setEditingDob(false);
       setEmailValue(admin.email);
+      setNameValue(admin.name);
+      setUsernameValue(admin.username);
       setPrefixValue(admin.mobile_prefix);
       setMobileValue(String(admin.mobile_number ?? ''));
       setDobValue(admin.dob || '');
@@ -282,6 +299,8 @@ const AdminRow = ({ admin, roles }: { admin: Admin, roles: Role[] }) => {
       setEditingEmail(false);
       setEditingPhone(false);
       setEditingDob(false);
+      setEditingName(false);
+      setEditingUsername(false);
     },
     onError: (e: any) => {
       const msg = e?.response?.data?.detail || e?.message || 'Failed to update profile';
@@ -289,9 +308,50 @@ const AdminRow = ({ admin, roles }: { admin: Admin, roles: Role[] }) => {
     }
   });
 
+  const passwordChangeMutation = useMutation<void, Error, { targetId: string; newPassword: string; adminPassword: string }>({
+    mutationFn: async ({ targetId, newPassword, adminPassword }) => {
+      // First verify super admin's password by attempting to get token
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ username: user?.username, password: adminPassword })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Invalid super admin password');
+      }
+      
+      // Now update the target user's password
+      await put(`/admin/users/${targetId}/`, { password: newPassword });
+    },
+    onSuccess: () => {
+      toast.success('Password changed successfully');
+      setShowPasswordDialog(false);
+      setNewPassword('');
+      setConfirmPassword('');
+      setSuperAdminPassword('');
+      queryClient.invalidateQueries({ queryKey: ['admins'] });
+    },
+    onError: (e: any) => {
+      const msg = e?.message || e?.response?.data?.detail || 'Failed to change password';
+      toast.error(String(msg));
+    }
+  });
+
   const saveEmail = () => {
     if (!canModify) return;
     updateMutation.mutate({ id: admin._id, payload: { email: emailValue } });
+  };
+  const saveName = () => {
+    if (!canModify) return;
+    updateMutation.mutate({ id: admin._id, payload: { name: nameValue } });
+  };
+  const saveUsername = () => {
+    if (!canModify) return;
+    const newUsername = (usernameValue || '').trim();
+    if (!newUsername) { toast.error('Username cannot be empty'); return; }
+    updateMutation.mutate({ id: admin._id, payload: { username: newUsername } });
   };
   const savePhone = () => {
     if (!canModify) return;
@@ -305,6 +365,100 @@ const AdminRow = ({ admin, roles }: { admin: Admin, roles: Role[] }) => {
   const saveDob = () => {
     if (!canModify) return;
     updateMutation.mutate({ id: admin._id, payload: { dob: dobValue } });
+  };
+
+  const enterEditMode = () => {
+    if (!canModify) return;
+    setSnapshot({
+      name: nameValue,
+      username: usernameValue,
+      email: emailValue,
+      mobile_prefix: prefixValue,
+      mobile_number: String(mobileValue || ''),
+      dob: dobValue,
+    });
+    setModalEditing(true);
+  };
+
+  const cancelEdit = () => {
+    if (snapshot) {
+      setNameValue(snapshot.name);
+      setUsernameValue(snapshot.username);
+      setEmailValue(snapshot.email);
+      setPrefixValue(snapshot.mobile_prefix);
+      setMobileValue(String(snapshot.mobile_number || ''));
+      setDobValue(snapshot.dob);
+    } else {
+      // Fallback to server values
+      setNameValue(admin.name);
+      setUsernameValue(admin.username);
+      setEmailValue(admin.email);
+      setPrefixValue(admin.mobile_prefix);
+      setMobileValue(String(admin.mobile_number ?? ''));
+      setDobValue(admin.dob || '');
+    }
+    setModalEditing(false);
+  };
+
+  const saveAllChanges = () => {
+    if (!canModify) return;
+    const diff: Partial<Admin> = {};
+    if (nameValue !== admin.name) (diff as any).name = nameValue;
+    const trimmedUser = (usernameValue || '').trim();
+    if (trimmedUser !== admin.username) (diff as any).username = trimmedUser;
+    if (emailValue !== admin.email) (diff as any).email = emailValue;
+    if (prefixValue !== admin.mobile_prefix) (diff as any).mobile_prefix = prefixValue;
+    const num = Number(mobileValue);
+    if (Number.isFinite(num) && num !== admin.mobile_number) (diff as any).mobile_number = num;
+    if ((dobValue || '') !== (admin.dob || '')) (diff as any).dob = dobValue;
+
+    if (Object.keys(diff).length === 0) {
+      toast.info('No changes to save.');
+      setModalEditing(false);
+      return;
+    }
+
+    updateMutation.mutate({ id: admin._id, payload: diff });
+    setModalEditing(false);
+  };
+
+  const handlePasswordChange = () => {
+    if (!newPassword || !confirmPassword || !superAdminPassword) {
+      toast.error('All password fields are required');
+      return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+    
+    // Validate password requirements
+    if (newPassword.length < 8) {
+      toast.error('Password must be at least 8 characters long');
+      return;
+    }
+    
+    if (!/[a-zA-Z]/.test(newPassword)) {
+      toast.error('Password must contain at least one letter');
+      return;
+    }
+    
+    if (!/\d/.test(newPassword)) {
+      toast.error('Password must contain at least one number');
+      return;
+    }
+    
+    if (!/[!@#$%^&*()_\-+=[\]{}|:;",.<>?/]/.test(newPassword)) {
+      toast.error('Password must contain at least one special character');
+      return;
+    }
+    
+    passwordChangeMutation.mutate({ 
+      targetId: admin._id, 
+      newPassword, 
+      adminPassword: superAdminPassword 
+    });
   };
 
   return (
@@ -337,6 +491,11 @@ const AdminRow = ({ admin, roles }: { admin: Admin, roles: Role[] }) => {
       <TableCell className="px-6 py-4">
         <div className="flex flex-wrap gap-2">
           <Button className="bg-gradient-to-r from-purple-600 to-pink-600 text-white" onClick={() => setIsProfileDialogOpen(true)}>Open Profile</Button>
+          {isCurrentUserSuperAdmin && !isSuperAdmin && (
+            <Button className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => setShowPasswordDialog(true)}>
+              Change Password
+            </Button>
+          )}
           <Button className="bg-red-600 text-white" disabled={!canModify} onClick={() => deleteMutation.mutate(admin._id)}>Delete</Button>
           <Button className="bg-amber-600 text-white" disabled={!canModify} onClick={() => restrictMutation.mutate({ id: admin._id, payload: { isRestricted: !admin.isRestricted } })}>
             {admin.isRestricted ? 'Unrestrict' : 'Restrict'}
@@ -363,22 +522,37 @@ const AdminRow = ({ admin, roles }: { admin: Admin, roles: Role[] }) => {
               </div>
               <div className="md:col-span-2 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Email panel */}
+                  {/* Name panel */}
                   <div className="bg-orange-50 border border-orange-200 rounded-md p-2">
                     <div className="flex items-center justify-between">
-                      <div className="text-xs uppercase tracking-wide text-orange-600">Email</div>
-                      {canModify && (
-                        editingEmail ? (
-                          <div className="flex items-center gap-1">
-                            <button className="text-green-600" onClick={saveEmail} title="Save"><Check className="w-4 h-4" /></button>
-                            <button className="text-red-600" onClick={() => { setEditingEmail(false); setEmailValue(admin.email); }} title="Cancel"><X className="w-4 h-4" /></button>
-                          </div>
-                        ) : (
-                          <button className="text-orange-600" onClick={() => setEditingEmail(true)} title="Edit"><Pencil className="w-4 h-4" /></button>
-                        )
-                      )}
+                      <div className="text-xs uppercase tracking-wide text-orange-600">Name</div>
                     </div>
-                    {editingEmail ? (
+                    {modalEditing && canModify ? (
+                      <Input type="text" value={nameValue} onChange={(e) => setNameValue(e.target.value)} className="bg-white border-orange-300 mt-1" />
+                    ) : (
+                      <div className="text-sm text-slate-900 mt-0.5 break-words">{nameValue}</div>
+                    )}
+                  </div>
+
+                  {/* Username panel */}
+                  <div className="bg-orange-50 border border-orange-200 rounded-md p-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs uppercase tracking-wide text-orange-600">Username</div>
+                    </div>
+                    {modalEditing && canModify ? (
+                      <Input type="text" value={usernameValue} onChange={(e) => setUsernameValue(e.target.value)} className="bg-white border-orange-300 mt-1" />
+                    ) : (
+                      <div className="text-sm text-slate-900 mt-0.5 break-words">{usernameValue}</div>
+                    )}
+                    <div className="text-[11px] text-orange-600 mt-1">Must be unique</div>
+                  </div>
+
+                  {/* Notification Email panel */}
+                  <div className="bg-orange-50 border border-orange-200 rounded-md p-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs uppercase tracking-wide text-orange-600">Notification Email</div>
+                    </div>
+                    {modalEditing && canModify ? (
                       <Input type="email" value={emailValue} onChange={(e) => setEmailValue(e.target.value)} className="bg-white border-orange-300 mt-1" />
                     ) : (
                       <div className="text-sm text-slate-900 mt-0.5 break-words">{emailValue}</div>
@@ -389,18 +563,8 @@ const AdminRow = ({ admin, roles }: { admin: Admin, roles: Role[] }) => {
                   <div className="bg-orange-50 border border-orange-200 rounded-md p-2">
                     <div className="flex items-center justify-between">
                       <div className="text-xs uppercase tracking-wide text-orange-600">Phone</div>
-                      {canModify && (
-                        editingPhone ? (
-                          <div className="flex items-center gap-1">
-                            <button className="text-green-600" onClick={savePhone} title="Save"><Check className="w-4 h-4" /></button>
-                            <button className="text-red-600" onClick={() => { setEditingPhone(false); setPrefixValue(admin.mobile_prefix); setMobileValue(String(admin.mobile_number ?? '')); }} title="Cancel"><X className="w-4 h-4" /></button>
-                          </div>
-                        ) : (
-                          <button className="text-orange-600" onClick={() => setEditingPhone(true)} title="Edit"><Pencil className="w-4 h-4" /></button>
-                        )
-                      )}
                     </div>
-                    {editingPhone ? (
+                    {modalEditing && canModify ? (
                       <div className="mt-1 flex gap-2 items-center">
                         <Input
                           type="text"
@@ -452,18 +616,8 @@ const AdminRow = ({ admin, roles }: { admin: Admin, roles: Role[] }) => {
                   <div className="bg-orange-50 border border-orange-200 rounded-md p-2">
                     <div className="flex items-center justify-between">
                       <div className="text-xs uppercase tracking-wide text-orange-600">DOB</div>
-                      {canModify && (
-                        editingDob ? (
-                          <div className="flex items-center gap-1">
-                            <button className="text-green-600" onClick={saveDob} title="Save"><Check className="w-4 h-4" /></button>
-                            <button className="text-red-600" onClick={() => { setEditingDob(false); setDobValue(admin.dob || ''); }} title="Cancel"><X className="w-4 h-4" /></button>
-                          </div>
-                        ) : (
-                          <button className="text-orange-600" onClick={() => setEditingDob(true)} title="Edit"><Pencil className="w-4 h-4" /></button>
-                        )
-                      )}
                     </div>
-                    {editingDob ? (
+                    {modalEditing && canModify ? (
                       <Input type="date" value={dobValue} onChange={(e) => setDobValue(e.target.value)} className="bg-white border-orange-300 mt-1" />
                     ) : (
                       <div className="text-sm text-slate-900 mt-0.5 break-words">{dobValue || '—'}</div>
@@ -502,7 +656,95 @@ const AdminRow = ({ admin, roles }: { admin: Admin, roles: Role[] }) => {
                     </div>
                   </div>
                 </div>
-                {/* no actions here; actions are visible in the table row */}
+                {/* Global actions at bottom only */}
+                {canModify && (
+                  <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
+                    {!modalEditing ? (
+                      <Button onClick={enterEditMode} className="bg-orange-600 text-white w-full sm:w-auto">Edit</Button>
+                    ) : (
+                      <>
+                        <Button variant="ghost" onClick={cancelEdit} className="w-full sm:w-auto">Cancel Changes</Button>
+                        <Button onClick={saveAllChanges} className="bg-orange-600 text-white w-full sm:w-auto">Save Changes</Button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Password Change Dialog */}
+        <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
+          <DialogContent className="bg-slate-900 border border-purple-500/30 text-white w-[95vw] max-w-xs max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-bold text-purple-400">
+                Change Password for {admin.name}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-purple-200 text-sm">As Super Admin, you can change this user's password. You must enter your own password to confirm.</p>
+              
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="newPassword" className="text-purple-300">New Password</Label>
+                  <Input
+                    id="newPassword"
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="bg-slate-800/50 border-purple-500/30 mt-1 text-white"
+                    placeholder="Min. 8 characters"
+                  />
+                  <p className="text-xs text-purple-300 mt-1">Must contain: letter, number, special character</p>
+                </div>
+                
+                <div>
+                  <Label htmlFor="confirmPassword" className="text-purple-300">Confirm New Password</Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="bg-slate-800/50 border-purple-500/30 mt-1 text-white"
+                    placeholder="Re-enter new password"
+                  />
+                </div>
+                
+                <div className="pt-4 border-t border-purple-500/30">
+                  <Label htmlFor="superAdminPassword" className="text-purple-300 font-semibold">Your Super Admin Password</Label>
+                  <p className="text-xs text-purple-200 mb-2">Enter your own password to authorize this change</p>
+                  <Input
+                    id="superAdminPassword"
+                    type="password"
+                    value={superAdminPassword}
+                    onChange={(e) => setSuperAdminPassword(e.target.value)}
+                    className="bg-slate-800/50 border-purple-500/30 text-white"
+                    placeholder="Your password"
+                  />
+                </div>
+              </div>
+              
+              <div className="flex justify-end gap-3 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowPasswordDialog(false);
+                    setNewPassword('');
+                    setConfirmPassword('');
+                    setSuperAdminPassword('');
+                  }}
+                  className="border-purple-500/30 text-purple-300 hover:bg-purple-900/20"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handlePasswordChange}
+                  disabled={passwordChangeMutation.isPending}
+                  className="bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700"
+                >
+                  {passwordChangeMutation.isPending ? 'Changing...' : 'Change Password'}
+                </Button>
               </div>
             </div>
           </DialogContent>
@@ -518,28 +760,33 @@ const AdminForm = ({ roles, adminToEdit, onSuccess, onClose }: { roles: Role[]; 
   type FormState = {
     name: string;
     email: string;
+    google_email: string;
     username: string;
     mobile_prefix: string;
     mobile_number: number | string;
-    password: string;
     role: string;
     role_id?: number;
     permissions: string[];
     isRestricted: boolean;
+    password?: string;
+    confirmPassword?: string;
   };
   const [formData, setFormData] = useState<FormState>({
     name: adminToEdit?.name || '',
-    email: adminToEdit?.email || '',
+    email: adminToEdit?.email || adminToEdit?.google_email || '',
+    google_email: adminToEdit?.google_email || '',
     username: adminToEdit?.username || '',
     mobile_prefix: adminToEdit?.mobile_prefix || '+91',
     mobile_number: adminToEdit?.mobile_number || '',
-    password: '',
     role: adminToEdit?.role || '',
     role_id: adminToEdit?.role_id,
     permissions: adminToEdit?.permissions || [],
     isRestricted: adminToEdit?.isRestricted || false,
+    password: '',
+    confirmPassword: '',
   });
-  const [showPassword, setShowPassword] = useState(false);
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [passwordError, setPasswordError] = useState<string>('');
   // Allowed roles: hide super admin always; only roles with role_id strictly greater than myRoleId
   const allowedRoles = roles.filter(r => r.role_id !== 0 && r.role_id > myRoleId);
 
@@ -563,23 +810,70 @@ const AdminForm = ({ roles, adminToEdit, onSuccess, onClose }: { roles: Role[]; 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (!adminToEdit) {
+      // CREATE mode - password is required
+      if (!formData.password) {
+        toast.error('Password is required');
+        setPasswordError('Password is required');
+        return;
+      }
+      
+      if (formData.password !== formData.confirmPassword) {
+        toast.error('Passwords do not match');
+        setPasswordError('Passwords do not match');
+        return;
+      }
+      
+      // Validate password requirements
+      if (formData.password.length < 8) {
+        toast.error('Password must be at least 8 characters long');
+        setPasswordError('Password must be at least 8 characters long');
+        return;
+      }
+      
+      if (!/[a-zA-Z]/.test(formData.password)) {
+        toast.error('Password must contain at least one letter');
+        setPasswordError('Password must contain at least one letter');
+        return;
+      }
+      
+      if (!/\d/.test(formData.password)) {
+        toast.error('Password must contain at least one number');
+        setPasswordError('Password must contain at least one number');
+        return;
+      }
+      
+      if (!/[!@#$%^&*()_\-+=[\]{}|:;",.<>?/]/.test(formData.password)) {
+        toast.error('Password must contain at least one special character');
+        setPasswordError('Password must contain at least one special character');
+        return;
+      }
+      
       if (formData.role_id == null) {
         toast.error('Please select a role');
         return;
       }
+      
       // CREATE: must satisfy AdminCreate requirements
-      const payload: AdminCreationPayload = {
-        ...formData,
+      const payload = {
+        name: formData.name,
+        email: formData.email,
+        username: formData.username,
+        mobile_prefix: formData.mobile_prefix,
         mobile_number: Number(formData.mobile_number),
+        role: formData.role,
+        role_id: formData.role_id,
+        permissions: formData.permissions,
+        isRestricted: formData.isRestricted,
+        password: formData.password,
       } as AdminCreationPayload;
-      payload.hashed_password = payload.password;
-      delete (payload as any).password;
       mutation.mutate(payload);
     } else {
       // UPDATE: send only changed fields
       const diff: Partial<AdminUpdatePayload> = {};
       if (formData.name !== adminToEdit.name) diff.name = formData.name;
+      if ((formData.google_email || '') !== (adminToEdit.google_email || '')) diff.google_email = formData.google_email;
       if (formData.email !== adminToEdit.email) diff.email = formData.email;
       // Username cannot be edited after creation
       if (formData.mobile_prefix !== adminToEdit.mobile_prefix) diff.mobile_prefix = formData.mobile_prefix;
@@ -588,9 +882,6 @@ const AdminForm = ({ roles, adminToEdit, onSuccess, onClose }: { roles: Role[]; 
       if (formData.isRestricted !== adminToEdit.isRestricted) diff.isRestricted = formData.isRestricted;
       if (formData.role_id !== adminToEdit.role_id) diff.role_id = formData.role_id;
       if (formData.role && formData.role !== adminToEdit.role) diff.role = formData.role;
-      if (formData.password && String(formData.password).trim().length > 0) {
-        diff.hashed_password = String(formData.password);
-      }
       // role/permissions only if you actually surface editable controls for them
       // if changed: diff.role = formData.role; diff.permissions = formData.permissions;
 
@@ -607,32 +898,7 @@ const AdminForm = ({ roles, adminToEdit, onSuccess, onClose }: { roles: Role[]; 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <div className="col-span-2">
-          <Label htmlFor="role" className="text-purple-300">Role</Label>
-          <select
-            id="role"
-            className="w-full bg-slate-800/50 border-purple-500/30 mt-1 rounded-md p-2"
-            value={formData.role_id != null ? String(formData.role_id) : ''}
-            onChange={(e) => {
-              const val = e.target.value;
-              if (!val) {
-                setFormData({ ...formData, role_id: undefined, role: '' });
-                return;
-              }
-              const selected = allowedRoles.find(r => String(r.role_id) === val);
-              if (selected) {
-                setFormData({ ...formData, role_id: selected.role_id, role: selected.role_name });
-              }
-            }}
-          >
-            <option value="">Select role</option>
-            {allowedRoles.map(r => (
-              <option key={r._id} value={String(r.role_id)}>{r.role_name}</option>
-            ))}
-          </select>
-        </div>
-        <FormField label="Name" id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
-        <FormField label="Email" id="email" type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
+        {/* Username first */}
         {adminToEdit ? (
           <div>
             <Label htmlFor="username" className="text-purple-300">Username</Label>
@@ -642,6 +908,54 @@ const AdminForm = ({ roles, adminToEdit, onSuccess, onClose }: { roles: Role[]; 
         ) : (
           <FormField label="Username" id="username" value={formData.username} onChange={(e) => setFormData({ ...formData, username: e.target.value })} />
         )}
+        {/* Authentication Email is not required for Create. Show only when editing an existing admin. */}
+        {adminToEdit && (
+          <FormField
+            label="Authentication Email (for login)"
+            id="google_email"
+            type="email"
+            value={formData.google_email}
+            onChange={(e) => {
+              const val = e.target.value;
+              setFormData((prev) => ({ ...prev, google_email: val }));
+            }}
+          />
+        )}
+        {/* Name */}
+        <FormField label="Name" id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
+        {/* Email */}
+        <div>
+          <Label htmlFor="email" className="text-purple-300">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            className="bg-slate-800/50 border-purple-500/30 mt-1"
+            value={formData.email}
+            onChange={(e) => { setEmailTouched(true); setFormData({ ...formData, email: e.target.value }); }}
+          />
+          <div className="text-xs text-gray-400 mt-1">This email will be used for notifications and contact.</div>
+        </div>
+        {/* Role select below identity fields */}
+        <div className="col-span-2">
+          <Label htmlFor="role" className="text-purple-300">Role</Label>
+          <select
+            id="role"
+            className="w-full bg-slate-800/50 border-purple-500/30 mt-1 rounded-md p-2"
+            value={formData.role_id != null ? String(formData.role_id) : ''}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (!val) { setFormData({ ...formData, role_id: undefined, role: '' }); return; }
+              const selected = allowedRoles.find(r => String(r.role_id) === val);
+              if (selected) { setFormData({ ...formData, role_id: selected.role_id, role: selected.role_name }); }
+            }}
+          >
+            <option value="">Select role</option>
+            {allowedRoles.map(r => (
+              <option key={r._id} value={String(r.role_id)}>{r.role_name}</option>
+            ))}
+          </select>
+        </div>
+        {/* Phone */}
         <div className="flex gap-2">
           <div className="w-1/3">
             <Label htmlFor="mobile_prefix" className="text-purple-300">Prefix</Label>
@@ -682,22 +996,57 @@ const AdminForm = ({ roles, adminToEdit, onSuccess, onClose }: { roles: Role[]; 
             />
           </div>
         </div>
-        {!adminToEdit && (
-          <div className="relative">
-            <FormField label="Password" id="password" type={showPassword ? 'text' : 'password'} value={formData.password} onChange={(e) => setFormData({ ...formData, password: e.target.value })} />
-            <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-9 text-gray-400">
-              {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-            </button>
-          </div>
-        )}
       </div>
+
+      {/* Password fields - only show when creating new admin */}
+      {!adminToEdit && (
+        <div className="grid grid-cols-2 gap-4 pt-4 border-t border-purple-500/30">
+          <div>
+            <Label htmlFor="password" className="text-purple-300">Password *</Label>
+            <Input
+              id="password"
+              type="password"
+              className="bg-slate-800/50 border-purple-500/30 mt-1"
+              value={formData.password || ''}
+              onChange={(e) => {
+                setFormData({ ...formData, password: e.target.value });
+                setPasswordError('');
+              }}
+              placeholder="Min. 8 characters"
+            />
+            <p className="text-xs text-purple-300 mt-1">Must contain: letter, number, special character</p>
+          </div>
+          <div>
+            <Label htmlFor="confirmPassword" className="text-purple-300">Confirm Password *</Label>
+            <Input
+              id="confirmPassword"
+              type="password"
+              className="bg-slate-800/50 border-purple-500/30 mt-1"
+              value={formData.confirmPassword || ''}
+              onChange={(e) => {
+                setFormData({ ...formData, confirmPassword: e.target.value });
+                setPasswordError('');
+              }}
+              placeholder="Re-enter password"
+            />
+            {passwordError && <p className="text-red-400 text-xs mt-1">{passwordError}</p>}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center space-x-2">
         <Checkbox id="isRestricted" checked={formData.isRestricted} onCheckedChange={(checked) => setFormData({ ...formData, isRestricted: !!checked })} />
         <Label htmlFor="isRestricted">Restrict this admin</Label>
       </div>
       <div className="flex justify-end gap-4">
-        {onClose && <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>}
-        <Button type="submit" disabled={mutation.isPending || (!adminToEdit && allowedRoles.length === 0)}>{mutation.isPending ? 'Saving...' : 'Save Admin'}</Button>
+        {onClose && (
+          <Button type="button" variant="outline" onClick={onClose} className="border-purple-500/30 text-purple-300">
+            Cancel
+          </Button>
+        )}
+        <Button type="submit" disabled={mutation.isPending || (!adminToEdit && allowedRoles.length === 0)}>
+          {mutation.isPending ? 'Saving...' : (adminToEdit ? 'Update Admin' : 'Create Admin')}
+        </Button>
       </div>
     </form>
   );

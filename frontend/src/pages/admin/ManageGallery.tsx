@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import api, { get } from '../../api/api';
+import api, { get, API_BASE_URL } from '@/api/api';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,9 +9,8 @@ import { Trash2, Edit, ImageIcon, Folder, Hash, ExternalLink } from 'lucide-reac
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { resolveImageUrl } from '@/lib/utils';
-import GalleryLayoutDesigner from '@/pages/admin/GalleryLayoutDesigner';
-import { API_BASE_URL } from '@/api/api';
-
+import { requestSignedUpload, uploadFileToCloudinary } from '@/lib/cloudinary';
+import GalleryStaticLayoutManager from '@/pages/admin/GalleryStaticLayoutManager';
 
 interface GalleryImage {
     _id: string;
@@ -26,7 +25,7 @@ const ManageGallery = () => {
     const queryClient = useQueryClient();
     const { user } = (useAuth() as any) || {};
     const roleId: number = user?.role_id ?? 99;
-        const isReadOnly = roleId > 3;
+    const isReadOnly = roleId > 3;
     const [isEditing, setIsEditing] = useState<GalleryImage | null>(null);
     const [formData, setFormData] = useState({ src: '', title: '', category: '' });
     const [uploading, setUploading] = useState(false);
@@ -34,6 +33,7 @@ const ManageGallery = () => {
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [selectedFileName, setSelectedFileName] = useState<string>('');
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+
     const [designerMode, setDesignerMode] = useState<null | 'full'>(null);
     const [designerInlineOpen, setDesignerInlineOpen] = useState(false);
     const [homePreviewOpen, setHomePreviewOpen] = useState(false);
@@ -54,16 +54,13 @@ const ManageGallery = () => {
     const { data: images, isLoading } = useQuery<GalleryImage[]>({ queryKey: ['adminGallery'], queryFn: fetchGalleryImages });
     const imagesById = useMemo(() => Object.fromEntries((images || []).map(i => [i._id, i])), [images]);
 
-    // Load existing Home Preview config on mount
+    // Load existing Home Preview config on mount.
     useEffect(() => {
         (async () => {
             try {
-                const res = await fetch(`${API_BASE_URL}/api/gallery-home-preview/`);
-                if (res.ok) {
-                    const data = await res.json();
-                    const slots = (data.slots || [null, null, null, null, null, null]) as (string | null)[];
-                    setHomeSlots(slots);
-                }
+                const data = await get<{ slots: (string | null)[] }>(`/gallery-home-preview/`);
+                const slots = (data?.slots || [null, null, null, null, null, null]) as (string | null)[];
+                setHomeSlots(slots);
             } catch {
                 // ignore
             }
@@ -136,18 +133,23 @@ const ManageGallery = () => {
             </div>
         );
     };
+
+    // Slideshow config
     const [slideConfigOpen, setSlideConfigOpen] = useState(false);
     const [slides, setSlides] = useState<string[]>([]);
-    const [intervalMs, setIntervalMs] = useState(4000);
-    const [transitionMs, setTransitionMs] = useState(600);
+    const [intervalMs, setIntervalMs] = useState<number | string>(4000);
+    const [transitionMs, setTransitionMs] = useState<number | string>(600);
     const [aspectRatio, setAspectRatio] = useState<'16:9' | '4:3' | '1:1' | '21:9'>('16:9');
+    const [intervalError, setIntervalError] = useState<string | null>(null);
+    const [transitionError, setTransitionError] = useState<string | null>(null);
+
 
     useEffect(() => {
         (async () => {
             try {
-                const res = await fetch(`${API_BASE_URL}/api/slideshow/`);
-                if (res.ok) {
-                    const data = await res.json();
+                // Using the 'get' helper which correctly uses the axios instance
+                const data = await get<any>(`/slideshow/`);
+                if (data) {
                     setSlides((data.image_ids || []).filter((id: string) => (images || []).some(i => i._id === id)));
                     setIntervalMs(data.interval_ms || 4000);
                     setTransitionMs(data.transition_ms || 600);
@@ -161,13 +163,11 @@ const ManageGallery = () => {
 
     const mutation = useMutation({
         mutationFn: (imagePayload: Omit<GalleryImage, '_id'>) => {
-            const token = localStorage.getItem('token');
-            const config = { headers: { Authorization: `Bearer ${token}` } };
             if (roleId > 3) throw new Error('Not authorized');
             if (isEditing) {
-                return api.put(`/gallery/${isEditing._id}`, imagePayload, config);
+                return api.put(`/gallery/${isEditing._id}`, imagePayload);
             }
-            return api.post('/gallery', imagePayload, config);
+            return api.post('/gallery', imagePayload);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['adminGallery'] });
@@ -181,17 +181,15 @@ const ManageGallery = () => {
             if (fileInputRef.current) fileInputRef.current.value = '';
         },
         onError: (error) => {
-            console.error("Error saving image:", error);
+            console.error('Error saving image:', error);
             toast.error('Failed to save image. See console for details.');
         }
     });
 
     const deleteMutation = useMutation({
         mutationFn: (id: string) => {
-            const token = localStorage.getItem('token');
-            const config = { headers: { Authorization: `Bearer ${token}` } };
             if (roleId > 3) throw new Error('Not authorized');
-            return api.delete(`/gallery/${id}`, config);
+            return api.delete(`/gallery/${id}`);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['adminGallery'] });
@@ -200,7 +198,7 @@ const ManageGallery = () => {
             toast.success('Image deleted successfully!');
         },
         onError: (error) => {
-            console.error("Error deleting image:", error);
+            console.error('Error deleting image:', error);
             toast.error('Failed to delete image. See console for details.');
         }
     });
@@ -216,27 +214,31 @@ const ManageGallery = () => {
             setUploading(true);
             setUploadError(null);
             try {
-                const token = localStorage.getItem('token');
-                const form = new FormData();
-                form.append('file', selectedFile);
-                const res = await fetch(`${API_BASE_URL}/api/gallery/upload`, {
-                    method: 'POST',
-                    headers: {
-                        Authorization: `Bearer ${token ?? ''}`,
-                    },
-                    body: form,
-                });
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err?.detail || 'Upload failed');
+                const signed = await requestSignedUpload('/gallery/get_signed_upload', selectedFile);
+
+                if (selectedFile.size > signed.max_file_bytes) {
+                    throw new Error('Image exceeds the 2 MB limit.');
                 }
-                const data = await res.json();
-                imageUrl = data.url;
+
+                const cloudinaryResult = await uploadFileToCloudinary(signed, selectedFile);
+
+                const finalizePayload = {
+                    object_path: signed.object_path,
+                    public_id: cloudinaryResult.public_id,
+                    secure_url: cloudinaryResult.secure_url,
+                    format: cloudinaryResult.format,
+                    bytes: cloudinaryResult.bytes,
+                    version: cloudinaryResult.version ? String(cloudinaryResult.version) : undefined,
+                };
+
+                const finalizeResponse = await api.post<{ public_url: string }>('/gallery/finalize_upload', finalizePayload);
+                imageUrl = finalizeResponse.data.public_url;
                 toast.success('Image uploaded');
             } catch (err: any) {
                 console.error(err);
-                setUploadError(err?.message || 'Upload failed');
-                toast.error('Image upload failed');
+                const errorMsg = err?.response?.data?.detail || err?.message || 'Upload failed';
+                setUploadError(errorMsg);
+                toast.error(`Image upload failed: ${errorMsg}`);
                 setUploading(false);
                 return;
             } finally {
@@ -272,6 +274,115 @@ const ManageGallery = () => {
             setSelectedFileName('');
         }
     };
+    
+    // Handlers for slideshow interval and transition inputs.
+    // Provides real-time validation and allows the field to be cleared.
+    const handleIntervalChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        setIntervalMs(value);
+
+        if (value === '') {
+            setIntervalError('Interval is required.');
+            return;
+        }
+
+        const numValue = parseInt(value, 10);
+        if (isNaN(numValue)) {
+            setIntervalError('Please enter a valid number.');
+        } else if (numValue < 1000) {
+            setIntervalError('Minimum interval is 1000ms.');
+        } else if (numValue > 60000) {
+            setIntervalError('Maximum interval is 60000ms.');
+        } else {
+            setIntervalError(null);
+        }
+    };
+    
+    // Corrects the interval value if it's invalid when the user clicks away.
+    const handleIntervalBlur = () => {
+        let numValue = typeof intervalMs === 'string' ? parseInt(intervalMs, 10) : intervalMs;
+
+        if (intervalMs === '' || isNaN(numValue) || numValue < 1000) {
+            numValue = 1000;
+        } else if (numValue > 60000) {
+            numValue = 60000;
+        }
+        setIntervalMs(numValue);
+        setIntervalError(null);
+    };
+
+    // Handles changes for the slideshow transition time.
+    const handleTransitionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        setTransitionMs(value);
+
+        if (value === '') {
+            setTransitionError('Transition is required.');
+            return;
+        }
+
+        const numValue = parseInt(value, 10);
+        if (isNaN(numValue)) {
+            setTransitionError('Please enter a valid number.');
+        } else if (numValue < 600) {
+            setTransitionError('Minimum transition is 600ms.');
+        } else if (numValue > 5000) {
+            setTransitionError('Maximum transition is 5000ms.');
+        } else {
+            setTransitionError(null);
+        }
+    };
+
+    // Corrects the transition value on blur.
+    const handleTransitionBlur = () => {
+        let numValue = typeof transitionMs === 'string' ? parseInt(transitionMs, 10) : transitionMs;
+
+        if (transitionMs === '' || isNaN(numValue) || numValue < 600) {
+            numValue = 600;
+        } else if (numValue > 5000) {
+            numValue = 5000;
+        }
+        setTransitionMs(numValue);
+        setTransitionError(null);
+    };
+
+    // Saves the slideshow configuration after final validation.
+    const handleSaveSlideshow = async () => {
+        if (isReadOnly) {
+            toast.error('You are not authorized to modify slideshow.');
+            return;
+        }
+
+        let finalInterval = typeof intervalMs === 'string' ? parseInt(intervalMs, 10) : intervalMs;
+        let finalTransition = typeof transitionMs === 'string' ? parseInt(transitionMs, 10) : transitionMs;
+        
+        let hasError = false;
+        if (isNaN(finalInterval) || finalInterval < 1000 || finalInterval > 60000) {
+            toast.error('Interval must be between 1000 and 60000ms.');
+            hasError = true;
+        }
+        if (isNaN(finalTransition) || finalTransition < 600 || finalTransition > 5000) {
+            toast.error('Transition must be between 600 and 5000ms.');
+            hasError = true;
+        }
+
+        if (hasError) return;
+
+        try {
+            await api.post('/slideshow/', {
+                image_ids: slides,
+                interval_ms: finalInterval,
+                transition_ms: finalTransition,
+                aspect_ratio: aspectRatio
+            });
+            toast.success('Slideshow updated');
+            setSlideConfigOpen(false);
+        } catch (e) {
+            console.error(e);
+            toast.error('Failed to update slideshow');
+        }
+    };
+
 
     // Calculate stats
     const totalImages = images?.length || 0;
@@ -286,7 +397,7 @@ const ManageGallery = () => {
                     <Button
                         variant="outline"
                         onClick={() => setHomePreviewOpen(true)}
-                        className="border-purple-500/40 text-purple-900 bg-white hover:bg-purple-50"
+                        className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
                     >
                         Configure Home Preview
                     </Button>
@@ -352,7 +463,12 @@ const ManageGallery = () => {
 
             {/* Slideshow Config Button */}
             <div className="flex justify-end">
-                <Button variant="outline" onClick={() => setSlideConfigOpen(true)} className="border-purple-500/40 text-purple-100 hover:bg-purple-900/60">Configure Slideshow</Button>
+                <Button
+                    onClick={() => setSlideConfigOpen(true)}
+                    className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white"
+                >
+                    Configure Slideshow
+                </Button>
             </div>
 
             {/* Inline Home Preview Config Section */}
@@ -365,15 +481,7 @@ const ManageGallery = () => {
                             <Button onClick={async () => {
                                 if (isReadOnly) { toast.error('You are not authorized to modify home preview.'); return; }
                                 try {
-                                    const res = await fetch(`${API_BASE_URL}/api/gallery-home-preview/`, {
-                                        method: 'POST',
-                                        headers: {
-                                            'Content-Type': 'application/json',
-                                            Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
-                                        },
-                                        body: JSON.stringify({ slots: homeSlots }),
-                                    });
-                                    if (!res.ok) throw new Error('Failed');
+                                    await api.post('/gallery-home-preview/', { slots: homeSlots });
                                     toast.success('Home preview updated');
                                     queryClient.invalidateQueries({ queryKey: ['galleryHomePreview'] });
                                     setHomePreviewOpen(false);
@@ -430,25 +538,7 @@ const ManageGallery = () => {
                         <CardTitle className="text-lg font-semibold text-purple-100">Configure Slideshow</CardTitle>
                         <div className="flex items-center gap-2">
                             <Button variant="outline" onClick={() => setSlideConfigOpen(false)} className="border-purple-500/40 text-purple-900 bg-white hover:bg-purple-50">Close</Button>
-                            <Button onClick={async () => {
-                                if (isReadOnly) { toast.error('You are not authorized to modify slideshow.'); return; }
-                                try {
-                                    const res = await fetch(`${API_BASE_URL}/api/slideshow/`, {
-                                        method: 'POST',
-                                        headers: {
-                                            'Content-Type': 'application/json',
-                                            Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
-                                        },
-                                        body: JSON.stringify({ image_ids: slides, interval_ms: intervalMs, transition_ms: transitionMs, aspect_ratio: aspectRatio }),
-                                    });
-                                    if (!res.ok) throw new Error('Failed');
-                                    toast.success('Slideshow updated');
-                                    setSlideConfigOpen(false);
-                                } catch (e) {
-                                    console.error(e);
-                                    toast.error('Failed to update slideshow');
-                                }
-                            }} className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white">Save</Button>
+                            <Button onClick={handleSaveSlideshow} disabled={isReadOnly} className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white">Save</Button>
                         </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -482,7 +572,7 @@ const ManageGallery = () => {
                             <div className="flex items-center justify-between">
                                 <h4 className="text-sm font-semibold text-slate-800">Selected Slides Order</h4>
                                 <div className="flex gap-2">
-                                            <Button variant="outline" disabled={isReadOnly || slides.length === 0} onClick={() => !isReadOnly && setSlides([])} className="border-purple-500/40 text-purple-900 bg-white hover:bg-purple-50 disabled:opacity-50">Clear</Button>
+                                    <Button variant="outline" disabled={isReadOnly || slides.length === 0} onClick={() => !isReadOnly && setSlides([])} className="border-purple-500/40 text-purple-900 bg-white hover:bg-purple-50 disabled:opacity-50">Clear</Button>
                                 </div>
                             </div>
                             {slides.length === 0 ? (
@@ -536,39 +626,66 @@ const ManageGallery = () => {
                                 </div>
                             )}
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-6 gap-3 items-center">
-                            <label className="text-sm text-slate-800 col-span-1">Interval (ms)</label>
-                            <Input type="number" value={intervalMs} onChange={(e) => setIntervalMs(Math.max(1000, Math.min(60000, parseInt(e.target.value || '0', 10) || 4000)))} disabled={isReadOnly} className="bg-white border-purple-500/30 text-slate-800 w-full" />
-                            <label className="text-sm text-slate-800 col-span-1">Transition (ms)</label>
-                            <Input type="number" value={transitionMs} onChange={(e) => setTransitionMs(Math.max(100, Math.min(5000, parseInt(e.target.value || '0', 10) || 600)))} disabled={isReadOnly} className="bg-white border-purple-500/30 text-slate-800 w-full" />
-                            <label className="text-sm text-slate-800 col-span-1">Aspect Ratio</label>
-                            <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value as any)} disabled={isReadOnly} className="bg-white border-purple-500/30 text-slate-800 rounded px-2 py-2 w-full">
-                                <option value="16:9">16:9</option>
-                                <option value="4:3">4:3</option>
-                                <option value="1:1">1:1</option>
-                                <option value="21:9">21:9</option>
-                            </select>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="space-y-1">
+                                <label htmlFor="interval-ms" className="text-sm font-medium text-purple-100/90">Interval (ms)</label>
+                                <Input
+                                    id="interval-ms"
+                                    type="number"
+                                    value={intervalMs}
+                                    onChange={handleIntervalChange}
+                                    onBlur={handleIntervalBlur}
+                                    disabled={isReadOnly}
+                                    className={`bg-white border-purple-500/30 text-slate-800 w-full ${intervalError ? 'border-red-500' : ''}`}
+                                    placeholder="e.g., 4000"
+                                />
+                                {intervalError && <p className="text-sm text-red-400">{intervalError}</p>}
+                            </div>
+                            <div className="space-y-1">
+                                <label htmlFor="transition-ms" className="text-sm font-medium text-purple-100/90">Transition (ms)</label>
+                                <Input
+                                    id="transition-ms"
+                                    type="number"
+                                    value={transitionMs}
+                                    onChange={handleTransitionChange}
+                                    onBlur={handleTransitionBlur}
+                                    disabled={isReadOnly}
+                                    className={`bg-white border-purple-500/30 text-slate-800 w-full ${transitionError ? 'border-red-500' : ''}`}
+                                    placeholder="e.g., 600"
+                                />
+                                {transitionError && <p className="text-sm text-red-400">{transitionError}</p>}
+                            </div>
+                            <div className="space-y-1">
+                                <label htmlFor="aspect-ratio" className="text-sm font-medium text-purple-100/90">Aspect Ratio</label>
+                                <select
+                                    id="aspect-ratio"
+                                    value={aspectRatio}
+                                    onChange={(e) => setAspectRatio(e.target.value as any)}
+                                    disabled={isReadOnly}
+                                    className="bg-white border-purple-500/30 text-slate-800 rounded px-2 py-1.5 w-full h-[40px]"
+                                >
+                                    <option value="16:9">16:9</option>
+                                    <option value="4:3">4:3</option>
+                                    <option value="1:1">1:1</option>
+                                    <option value="21:9">21:9</option>
+                                </select>
+                            </div>
                         </div>
                     </CardContent>
                 </Card>
             )}
 
-            {/* Inline Full Gallery Designer */}
-            {designerMode && designerInlineOpen && (
+            {/* Inline Static Full Gallery Layout Manager */}
+            {designerMode === 'full' && designerInlineOpen && (
                 <Card className="bg-slate-900/80 backdrop-blur-sm border-purple-500/30 shadow-lg shadow-purple-500/10">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-lg font-semibold text-purple-300">Full Gallery Designer</CardTitle>
+                        <CardTitle className="text-lg font-semibold text-purple-300">Full Gallery Layout (Static Order)</CardTitle>
                         <div className="flex items-center gap-2">
                             <Button variant="outline" onClick={() => { setDesignerInlineOpen(false); setDesignerMode(null); }} className="border-purple-500/30 text-purple-300 hover:bg-purple-900/50">Close</Button>
                         </div>
                     </CardHeader>
                     <CardContent>
-                        <GalleryLayoutDesigner
-                            mode={designerMode}
-                            images={images || []}
-                            onClose={() => { setDesignerInlineOpen(false); setDesignerMode(null); }}
-                            inline
-                        />
+                        <GalleryStaticLayoutManager images={images || []} onSaveComplete={() => { setDesignerInlineOpen(false); setDesignerMode(null); }} />
                     </CardContent>
                 </Card>
             )}
@@ -594,7 +711,6 @@ const ManageGallery = () => {
                             onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                             disabled={isReadOnly}
                             className="bg-slate-800/50 border-purple-500/30 text-white placeholder-purple-300/70"
-                            required 
                         />
                         <Input 
                             placeholder="Category" 
@@ -602,7 +718,6 @@ const ManageGallery = () => {
                             onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                             disabled={isReadOnly}
                             className="bg-slate-800/50 border-purple-500/30 text-white placeholder-purple-300/70"
-                            required 
                         />
                         <div className="flex gap-2">
                             <Button 
@@ -623,7 +738,7 @@ const ManageGallery = () => {
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                     {images?.map(image => (
                         <Card key={image._id} className="relative group bg-slate-900/80 backdrop-blur-sm border-purple-500/30 shadow-lg shadow-purple-500/10">
-                            <img src={resolveImageUrl(image.src)} alt={image.title} className="w-full h-40 object-cover rounded-t-lg" onError={(e) => { e.currentTarget.src = 'https://placehold.co/600x400' }}/>
+                            <img src={resolveImageUrl(image.src)} alt={image.title} className="w-full h-40 object-cover rounded-t-lg" onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://placehold.co/600x400' }}/>
                             <div className="p-2">
                                <p className="font-semibold truncate text-white">{image.title}</p>
                                <p className="text-sm text-purple-300">{image.category}</p>
@@ -653,11 +768,8 @@ const ManageGallery = () => {
                 </div>
             )}
 
-            {/* Removed modal popup for designer in favor of inline section above */}
-            
         </div>
     );
 };
 
 export default ManageGallery;
-

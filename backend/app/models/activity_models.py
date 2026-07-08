@@ -9,6 +9,13 @@ class ActivityBase(BaseModel):
     role: str = Field(..., example="Super Admin")
     activity: str = Field(..., example="Created new admin user")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    
+    # Sync tracking fields
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    synced_at: Optional[datetime] = Field(None)
+    sync_origin: Optional[str] = Field(default="local")  # "local" or "remote"
+    sync_status: Optional[str] = Field(default="pending")  # "synced", "pending", "conflict"
 
 class ActivityCreate(ActivityBase):
     pass

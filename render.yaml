@@ -1,0 +1,81 @@
+# Render Blueprint for Split Backend Architecture
+# Use this to deploy both services at once
+
+services:
+  # Public API Service - User-facing operations
+  - type: web
+    name: temple-public-api
+    runtime: python
+    region: oregon  # or your preferred region
+    plan: free
+    rootDir: backend-public
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: PRIMARY_DATABASE
+        value: cloud
+      - key: DATABASE_NAME
+        value: temple_db
+      - key: DISABLE_HEAVY_MIDDLEWARE
+        value: true
+      - key: ENABLE_WAF_PROTECTION
+        value: false
+      - key: ENABLE_DDOS_PROTECTION
+        value: false
+      - key: ENABLE_RATE_LIMITING
+        value: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 30
+      - key: JWT_REFRESH_TOKEN_EXPIRE_DAYS
+        value: 7
+      # Add these via Render dashboard (sensitive):
+      # - MONGODB_CLOUD_URL
+      # - JWT_SECRET_KEY
+      # - CLOUDINARY_CLOUD_NAME
+      # - CLOUDINARY_API_KEY
+      # - CLOUDINARY_API_SECRET
+      # - DEFAULT_ADMIN_USERNAME
+      # - DEFAULT_ADMIN_PASSWORD
+      # - ALLOWED_ORIGINS
+
+  # Admin API Service - Administrative operations
+  - type: web
+    name: temple-admin-api
+    runtime: python
+    region: oregon  # same region as public API
+    plan: free
+    rootDir: backend-admin
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: PRIMARY_DATABASE
+        value: cloud
+      - key: DATABASE_NAME
+        value: temple_db
+      - key: DISABLE_HEAVY_MIDDLEWARE
+        value: false  # Admin can have slightly more security
+      - key: ENABLE_WAF_PROTECTION
+        value: false
+      - key: ENABLE_DDOS_PROTECTION
+        value: false
+      - key: ENABLE_RATE_LIMITING
+        value: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 30
+      - key: JWT_REFRESH_TOKEN_EXPIRE_DAYS
+        value: 7
+      # Add these via Render dashboard (sensitive) - MUST BE SAME AS PUBLIC API:
+      # - MONGODB_CLOUD_URL (SAME)
+      # - JWT_SECRET_KEY (SAME)
+      # - CLOUDINARY_CLOUD_NAME (SAME)
+      # - CLOUDINARY_API_KEY (SAME)
+      # - CLOUDINARY_API_SECRET (SAME)
+      # - DEFAULT_ADMIN_USERNAME (SAME)
+      # - DEFAULT_ADMIN_PASSWORD (SAME)
+      # - ALLOWED_ORIGINS (SAME)

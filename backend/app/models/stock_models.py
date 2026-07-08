@@ -14,6 +14,13 @@ class StockItemBase(BaseModel):
     minimumStock: int = 10
     description: Optional[str] = None
     addedOn: Union[date, datetime]
+    
+    # Sync tracking fields
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    synced_at: Optional[datetime] = Field(None)
+    sync_origin: Optional[str] = Field(default="local")  # "local" or "remote"
+    sync_status: Optional[str] = Field(default="pending")  # "synced", "pending", "conflict"
 
     @field_validator('expiryDate', mode='before')
     @classmethod

@@ -7,13 +7,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trash2, Edit, Flame, DollarSign, Plus, XCircle } from 'lucide-react';
+import { Trash2, Edit, Flame, DollarSign, Plus, XCircle, Star } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 // --- Type Definitions ---
 interface RequiredStock {
     stock_item_id: string;
-    stock_item_name?: string; // For frontend display
+    stock_item_name?: string; // Used for frontend display
     quantity_required: number;
 }
 
@@ -26,11 +26,14 @@ interface Ritual {
     popular: boolean;
     icon_name: string;
     required_stock: RequiredStock[];
-    booking_start_time?: string;   // NEW
-    booking_end_time?: string;     // NEW
-    employee_only?: boolean;       // NEW
-    available_from?: string;       // NEW
-    available_to?: string;         // NEW
+    booking_start_time?: string;
+    booking_end_time?: string;
+    employee_only?: boolean;
+    available_from?: string;
+    available_to?: string;
+    show_on_home?: boolean; // Used for featuring on home
+    is_nakshatrapooja?: boolean; // Nakshatrapooja special field
+    nakshatrapooja_color?: string; // Nakshatrapooja custom color
 }
 
 interface StockItem {
@@ -56,7 +59,8 @@ const ManageRituals = () => {
         name: '', description: '', price: '', duration: '', popular: false, icon_name: 'Star',
         required_stock: [] as RequiredStock[],
         booking_start_time: '', booking_end_time: '', employee_only: false,
-        available_from: '', available_to: '', date_range_option: 'all_time'
+        available_from: '', available_to: '', date_range_option: 'all_time', time_range_option: 'no_limit',
+        show_on_home: false
     });
     const [selectedStockId, setSelectedStockId] = useState('');
     const [requiredQuantity, setRequiredQuantity] = useState('1');
@@ -88,12 +92,14 @@ const ManageRituals = () => {
                 employee_only: !!isEditing.employee_only,
                 available_from: isEditing.available_from || '',
                 available_to: isEditing.available_to || '',
-                date_range_option: (isEditing.available_from || isEditing.available_to) ? 'custom' : 'all_time'
+                date_range_option: (isEditing.available_from || isEditing.available_to) ? 'custom' : 'all_time',
+                time_range_option: (isEditing.booking_start_time || isEditing.booking_end_time) ? 'custom' : 'no_limit',
+                show_on_home: !!isEditing.show_on_home
             });
         } else {
             setFormData({ name: '', description: '', price: '', duration: '', popular: false, icon_name: 'Star',
                 required_stock: [], booking_start_time: '', booking_end_time: '', employee_only: false,
-                available_from: '', available_to: '', date_range_option: 'all_time' });
+                available_from: '', available_to: '', date_range_option: 'all_time', time_range_option: 'no_limit', show_on_home: false });
         }
     }, [isEditing, stockMap]);
 
@@ -104,10 +110,17 @@ const ManageRituals = () => {
         const detail = resp?.data?.detail;
         if (resp && detail) {
             toast.error(typeof detail === 'string' ? detail : JSON.stringify(detail));
-        } else {
-            toast.error('An unexpected error occurred.');
+            return;
         }
+        const msg = (error as Error)?.message;
+        toast.error(msg || 'An unexpected error occurred.');
     };
+
+    // --- Derived State for Dashboard ---
+    const totalRituals = rituals?.length || 0;
+    const popularRituals = rituals?.filter(r => r.popular).length || 0;
+    const averagePrice = totalRituals > 0 ? rituals.reduce((sum, r) => sum + r.price, 0) / totalRituals : 0;
+    const featuredCount = rituals?.filter(r => r.show_on_home).length || 0;
 
     // --- Mutations (Create/Update/Delete) ---
     const mutation = useMutation({
@@ -116,7 +129,15 @@ const ManageRituals = () => {
             const config = { headers: { Authorization: `Bearer ${token}` } };
             if (roleId > 4) throw new Error('Not authorized for this action.');
             
-            // Sanitize required_stock before sending
+            // Used to enforce max 3 selected on client before sending
+            if (ritualPayload.show_on_home) {
+                const isSelectingNew = !isEditing || (isEditing && !isEditing.show_on_home);
+                if (isSelectingNew && featuredCount >= 3) {
+                    throw new Error('You can only feature up to 3 rituals on the home page.');
+                }
+            }
+
+            // Used to sanitize required_stock before sending
             const payload = {
                 name: ritualPayload.name,
                 description: ritualPayload.description,
@@ -124,12 +145,16 @@ const ManageRituals = () => {
                 duration: ritualPayload.duration,
                 popular: !!ritualPayload.popular,
                 icon_name: ritualPayload.icon_name,
-                booking_start_time: ritualPayload.booking_start_time || null,
-                booking_end_time: ritualPayload.booking_end_time || null,
+                booking_start_time: ritualPayload.time_range_option === 'custom' ? ritualPayload.booking_start_time || null : null,
+                booking_end_time: ritualPayload.time_range_option === 'custom' ? ritualPayload.booking_end_time || null : null,
                 employee_only: !!ritualPayload.employee_only,
-                // Handle date range properly - null for all_time, actual dates for custom
+                // Used to handle date range properly - null for all_time, actual dates for custom
                 available_from: ritualPayload.date_range_option === 'custom' ? ritualPayload.available_from || null : null,
                 available_to: ritualPayload.date_range_option === 'custom' ? ritualPayload.available_to || null : null,
+                show_on_home: !!ritualPayload.show_on_home,
+                // Preserve Nakshatrapooja special fields when editing
+                is_nakshatrapooja: isEditing?.is_nakshatrapooja || false,
+                nakshatrapooja_color: isEditing?.nakshatrapooja_color || null,
                 required_stock: ritualPayload.required_stock.map(({ stock_item_id, quantity_required }: RequiredStock) => ({
                     stock_item_id,
                     quantity_required: Number(quantity_required)
@@ -144,6 +169,7 @@ const ManageRituals = () => {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['adminRituals'] });
             queryClient.invalidateQueries({ queryKey: ['rituals'] });
+            queryClient.invalidateQueries({ queryKey: ['featuredRituals'] });
             toast.success(`Ritual ${isEditing ? 'updated' : 'added'} successfully!`);
             setIsEditing(null);
         },
@@ -158,7 +184,50 @@ const ManageRituals = () => {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['adminRituals'] });
+            queryClient.invalidateQueries({ queryKey: ['rituals'] });
+            queryClient.invalidateQueries({ queryKey: ['featuredRituals'] });
             toast.success('Ritual deleted!');
+        },
+        onError: handleMutationError,
+    });
+
+    const toggleShowOnHomeMutation = useMutation({
+        mutationFn: (ritualToToggle: Ritual) => {
+            const token = localStorage.getItem('token');
+            const config = { headers: { Authorization: `Bearer ${token}` } };
+            if (roleId > 4) throw new Error('Not authorized for this action.');
+    
+            const isEnabling = !ritualToToggle.show_on_home;
+            if (isEnabling && featuredCount >= 3) {
+                throw new Error('You can only feature up to 3 rituals on the home page.');
+            }
+    
+            const payload = {
+                name: ritualToToggle.name,
+                description: ritualToToggle.description,
+                price: ritualToToggle.price,
+                duration: ritualToToggle.duration,
+                popular: !!ritualToToggle.popular,
+                icon_name: ritualToToggle.icon_name,
+                booking_start_time: ritualToToggle.booking_start_time || null,
+                booking_end_time: ritualToToggle.booking_end_time || null,
+                employee_only: !!ritualToToggle.employee_only,
+                available_from: ritualToToggle.available_from || null,
+                available_to: ritualToToggle.available_to || null,
+                show_on_home: isEnabling, // The toggled value
+                required_stock: ritualToToggle.required_stock.map(({ stock_item_id, quantity_required }) => ({
+                    stock_item_id,
+                    quantity_required: Number(quantity_required)
+                }))
+            };
+    
+            return api.put(`/rituals/${ritualToToggle._id}`, payload, config);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['adminRituals'] });
+            queryClient.invalidateQueries({ queryKey: ['rituals'] });
+            queryClient.invalidateQueries({ queryKey: ['featuredRituals'] });
+            toast.success('Ritual visibility on home page updated!');
         },
         onError: handleMutationError,
     });
@@ -172,7 +241,7 @@ const ManageRituals = () => {
             return;
         }
         
-        // Validate custom date range
+        // Used to validate custom date range
         if (formData.date_range_option === 'custom') {
             if (!formData.available_from || !formData.available_to) {
                 toast.error("Both start and end dates are required for custom date range.");
@@ -184,6 +253,22 @@ const ManageRituals = () => {
             
             if (fromDate >= toDate) {
                 toast.error("End date must be after start date.");
+                return;
+            }
+        }
+        
+        // Used to validate custom time range
+        if (formData.time_range_option === 'custom') {
+            if (!formData.booking_start_time || !formData.booking_end_time) {
+                toast.error("Both start and end times are required for custom time range.");
+                return;
+            }
+            
+            const startTime = formData.booking_start_time;
+            const endTime = formData.booking_end_time;
+            
+            if (startTime >= endTime) {
+                toast.error("End time must be after start time.");
                 return;
             }
         }
@@ -239,14 +324,10 @@ const ManageRituals = () => {
         toast.success("Stock quantity updated!");
     };
 
-    // --- Derived State for Dashboard ---
-    const totalRituals = rituals?.length || 0;
-    const popularRituals = rituals?.filter(r => r.popular).length || 0;
-    const averagePrice = totalRituals > 0 ? rituals.reduce((sum, r) => sum + r.price, 0) / totalRituals : 0;
 
     return (
         <div className="space-y-6">
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-300 to-pink-400 bg-clip-text text-transparent">Manage Rituals</h1>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">Manage Rituals</h1>
             
             {/* Statistics Section */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -262,6 +343,11 @@ const ManageRituals = () => {
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium text-purple-300">Avg. Price</CardTitle><DollarSign className="h-4 w-4 text-amber-400" /></CardHeader>
                     <CardContent><div className="text-2xl font-bold text-white">₹{averagePrice.toFixed(2)}</div></CardContent>
                 </Card>
+            </div>
+
+            {/* Featured Counter */}
+            <div className="rounded-md border border-purple-500/20 bg-slate-900/60 p-3 text-sm text-purple-200">
+                Featured on Home: {featuredCount}/3
             </div>
 
             {/* Add/Edit Form */}
@@ -283,13 +369,23 @@ const ManageRituals = () => {
                         </div>
                         <div>
                             <Label htmlFor="description" className="text-purple-300">Description</Label>
-                            <textarea id="description" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="mt-1 w-full rounded-md bg-slate-800/50 border border-purple-500/30 text-white p-2 min-h-24 resize-y" required />
+                            <Input id="description" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="bg-slate-800/50 border-purple-500/30 text-white" required />
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             {/* Duration and Icon inputs */}
                              <div>
-                                <Label htmlFor="duration" className="text-purple-300">Duration</Label>
-                                <Input id="duration" value={formData.duration} onChange={(e) => setFormData({ ...formData, duration: e.target.value })} className="bg-slate-800/50 border-purple-500/30 text-white" required />
+                                <Label htmlFor="duration" className="text-purple-300">Duration (in hours)</Label>
+                                <Input 
+                                    id="duration" 
+                                    type="number" 
+                                    min="0.5" 
+                                    step="0.5" 
+                                    placeholder="e.g., 2"
+                                    value={formData.duration} 
+                                    onChange={(e) => setFormData({ ...formData, duration: e.target.value })} 
+                                    className="bg-slate-800/50 border-purple-500/30 text-white placeholder-purple-300/70" 
+                                    required 
+                                />
                             </div>
                              <div>
                                 <Label htmlFor="icon_name" className="text-purple-300">Icon</Label>
@@ -350,20 +446,91 @@ const ManageRituals = () => {
                             <Checkbox id="popular" checked={formData.popular} onCheckedChange={(checked) => setFormData({ ...formData, popular: !!checked })} className="border-purple-500/30 data-[state=checked]:bg-purple-600" />
                             <Label htmlFor="popular" className="text-purple-300">Mark as Popular</Label>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Booking Time Inputs */}
+                        {/* Show on Home */}
+                        <div className="flex items-center space-x-2">
+                            <Checkbox
+                                id="show_on_home"
+                                checked={formData.show_on_home}
+                                onCheckedChange={(checked) => {
+                                    const want = !!checked;
+                                    if (want) {
+                                        const isSelectingNew = !isEditing || (isEditing && !isEditing.show_on_home);
+                                        if (isSelectingNew && featuredCount >= 3) {
+                                            toast.error('You can only feature up to 3 rituals on the home page.');
+                                            return;
+                                        }
+                                    }
+                                    setFormData({ ...formData, show_on_home: want });
+                                }}
+                                className="border-purple-500/30 data-[state=checked]:bg-purple-600"
+                            />
+                            <Label htmlFor="show_on_home" className="text-purple-300">Show on Home (max 3)</Label>
+                        </div>
+                        {/* Time Range Section */}
+                        <div className="space-y-2 pt-4 border-t border-purple-500/20">
                             <div>
-                                <Label htmlFor="booking_start_time" className="text-purple-300">Booking Start (HH:MM)</Label>
-                                <Input id="booking_start_time" type="time" value={formData.booking_start_time}
-                                    onChange={e => setFormData({ ...formData, booking_start_time: e.target.value }) }
-                                    className="bg-slate-800/50 border-purple-500/30 text-white" />
+                                <Label className="text-purple-300">Booking Time Availability</Label>
+                                <p className="text-xs text-purple-400 mt-1">Control what time of day this ritual can be booked</p>
                             </div>
-                            <div>
-                                <Label htmlFor="booking_end_time" className="text-purple-300">Booking End (HH:MM)</Label>
-                                <Input id="booking_end_time" type="time" value={formData.booking_end_time}
-                                    onChange={e => setFormData({ ...formData, booking_end_time: e.target.value }) }
-                                    className="bg-slate-800/50 border-purple-500/30 text-white" />
-                            </div>
+                            <select
+                                value={formData.time_range_option}
+                                onChange={(e) => {
+                                    const newValue = e.target.value;
+                                    setFormData({ 
+                                        ...formData, 
+                                        time_range_option: newValue,
+                                        // Used to clear times when switching to no_limit
+                                        booking_start_time: newValue === 'no_limit' ? '' : formData.booking_start_time,
+                                        booking_end_time: newValue === 'no_limit' ? '' : formData.booking_end_time
+                                    });
+                                }}
+                                className="mt-1 w-full h-10 rounded-md border border-purple-500/30 bg-slate-800/50 px-3 text-sm text-white"
+                            >
+                                <option value="no_limit">No Time Limit (24/7 Available)</option>
+                                <option value="custom">Specific Time Range</option>
+                            </select>
+                            
+                            {formData.time_range_option === 'no_limit' && (
+                                <div className="bg-green-900/20 p-3 rounded-md border border-green-500/30">
+                                    <p className="text-sm text-green-300">
+                                        ✓ This ritual can be booked at any time of day (24/7 availability).
+                                    </p>
+                                </div>
+                            )}
+                            
+                            {formData.time_range_option === 'custom' && (
+                                <div className="space-y-3">
+                                    <div className="bg-blue-50 dark:bg-blue-900 p-3 rounded-md border border-blue-300 dark:border-blue-700 shadow">
+                                        <p className="text-sm text-blue-900 dark:text-blue-100 font-medium">
+                                        🕐 Set specific hours when this ritual can be booked.
+                                        </p>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <Label htmlFor="booking_start_time" className="text-purple-300">Available From *</Label>
+                                            <Input
+                                                id="booking_start_time"
+                                                type="time"
+                                                value={formData.booking_start_time}
+                                                onChange={(e) => setFormData({ ...formData, booking_start_time: e.target.value })}
+                                                className="bg-slate-800/50 border-purple-500/30 text-white"
+                                                required={formData.time_range_option === 'custom'}
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="booking_end_time" className="text-purple-300">Available To *</Label>
+                                            <Input
+                                                id="booking_end_time"
+                                                type="time"
+                                                value={formData.booking_end_time}
+                                                onChange={(e) => setFormData({ ...formData, booking_end_time: e.target.value })}
+                                                className="bg-slate-800/50 border-purple-500/30 text-white"
+                                                required={formData.time_range_option === 'custom'}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         <div className="flex items-center mt-6">
                             <Checkbox id="employee_only" checked={formData.employee_only}
@@ -385,7 +552,7 @@ const ManageRituals = () => {
                                     setFormData({ 
                                         ...formData, 
                                         date_range_option: newValue,
-                                        // Clear dates when switching to all_time
+                                        // Used to clear dates when switching to all_time
                                         available_from: newValue === 'all_time' ? '' : formData.available_from,
                                         available_to: newValue === 'all_time' ? '' : formData.available_to
                                     });
@@ -406,8 +573,8 @@ const ManageRituals = () => {
                             
                             {formData.date_range_option === 'custom' && (
                                 <div className="space-y-3">
-                                    <div className="bg-blue-900/20 p-3 rounded-md border border-blue-500/30">
-                                        <p className="text-sm text-blue-300">
+                                    <div className="bg-blue-50 dark:bg-blue-900 p-3 rounded-md border border-blue-300 dark:border-blue-700 shadow">
+                                            <p className="text-sm text-blue-900 dark:text-blue-100 font-medium">
                                             📅 Set specific start and end dates for this ritual's availability.
                                         </p>
                                     </div>
@@ -454,13 +621,14 @@ const ManageRituals = () => {
                 <div className="space-y-2">
                     {rituals?.map((ritual) => (
                         <Card key={ritual._id} className="p-4 bg-slate-900/80 backdrop-blur-sm border-purple-500/30">
-                            <div className="flex items-start justify-between gap-3 flex-wrap">
+                            <div className="flex items-center justify-between">
                                 <div className="flex-grow">
                                     <div className="font-semibold text-white">{ritual.name} - ₹{ritual.price}</div>
                                     <p className="text-xs text-purple-400">
                                         {ritual.booking_start_time && ritual.booking_end_time
                                             ? `Window: ${ritual.booking_start_time} - ${ritual.booking_end_time}` : 'No window'}
                                         {ritual.employee_only && <span className="ml-2 text-amber-400">(Employee Only)</span>}
+                                        {ritual.show_on_home && <span className="ml-2 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-200">Featured</span>}
                                     </p>
                                     {ritual.available_from && ritual.available_to ? (
                                         <p className="text-xs text-purple-400">
@@ -469,13 +637,31 @@ const ManageRituals = () => {
                                     ) : (
                                         <p className="text-xs text-purple-400">📅 Available: All time</p>
                                     )}
-                                    <p className="text-sm text-purple-100/90 break-words overflow-hidden line-clamp-3 max-h-24 overflow-auto pr-1">
+                                    <p className="text-sm text-purple-300 overflow-hidden line-clamp-3">
                                         {ritual.description}
                                     </p>
                                 </div>
-                                <div className="flex gap-2 ml-auto">
+                                <div className="flex gap-2 ml-4">
+                                    <Button
+                                        variant={ritual.show_on_home ? "default" : "outline"}
+                                        size="icon"
+                                        onClick={() => toggleShowOnHomeMutation.mutate(ritual)}
+                                        disabled={
+                                            roleId > 4 ||
+                                            (featuredCount >= 3 && !ritual.show_on_home) ||
+                                            toggleShowOnHomeMutation.isPending
+                                        }
+                                        className={
+                                            ritual.show_on_home
+                                                ? "bg-amber-500 hover:bg-amber-600 text-white border-amber-600"
+                                                : "border-purple-500/30 text-purple-300 hover:bg-purple-900/50"
+                                        }
+                                        title={ritual.show_on_home ? "Remove from Home" : "Show on Home"}
+                                    >
+                                        <Star className={`h-4 w-4 ${ritual.show_on_home ? 'fill-current' : ''}`} />
+                                    </Button>
                                     <Button variant="outline" size="icon" onClick={() => setIsEditing(ritual)} disabled={roleId > 4} className="border-purple-500/30 text-purple-300 hover:bg-purple-900/50"><Edit className="h-4 w-4" /></Button>
-                                    <Button variant="destructive" size="icon" onClick={() => deleteMutation.mutate(ritual._id)} disabled={roleId > 4 || deleteMutation.isPending} className="bg-red-900/80 border-red-700/30 text-red-300 hover:bg-red-900"><Trash2 className="h-4 w-4" /></Button>
+                                    <Button size="icon"onClick={() => deleteMutation.mutate(ritual._id)}disabled={roleId > 4 || deleteMutation.isPending}className="bg-red-600 hover:bg-red-700 text-white border border-red-700 shadow-md"><Trash2 className="h-4 w-4" /></Button>
                                 </div>
                             </div>
                             {ritual.required_stock?.length > 0 && (

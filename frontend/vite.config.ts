@@ -6,8 +6,9 @@ import { componentTagger } from "lovable-tagger";
 export default defineConfig(({ mode }) => ({
   base: "/", // Important for Netlify SPA routing
   server: {
-    host: "::",
+    host: "0.0.0.0",
     port: 5173,
+    strictPort: false,
   },
   plugins: [
     react(),

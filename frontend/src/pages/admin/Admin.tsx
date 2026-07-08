@@ -1,21 +1,21 @@
+import React from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Calendar, Package, Image, TrendingUp, Flame, Star, DollarSign, Clock, MapPin } from "lucide-react"
 import { Link } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import api, { get } from "../../api/api"
+import api, { get, fetchBookings, fetchEmployeeBookings, EmployeeBooking, Booking } from "../../api/api"
 import { toast } from "sonner"
 import { useAuth } from "../../contexts/AuthContext"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart"
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis, PieChart, Pie, Cell } from "recharts"
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 
 // Define interfaces for the data we'll fetch
-interface Booking {
-  _id: string;
-  name: string;
-  email: string;
-  phone: string;
-  address: string;
-  total_cost: number;
-  instances: RitualInstance[];
-}
 
 interface RitualInstance {
   ritualId: string;
@@ -55,21 +55,47 @@ interface ActivityRec {
   timestamp: string; // ISO
 }
 
+// Define stock item interface
+interface StockItem {
+  _id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+}
+
 // Fetch bookings data
-const fetchBookings = (): Promise<Booking[]> => get<Booking[]>('/bookings/');
 
 // Fetch rituals data
 const fetchRituals = (): Promise<Ritual[]> => get<Ritual[]>('/rituals/');
+
+// Fetch stock data
+const fetchStockItems = (): Promise<StockItem[]> => get<StockItem[]>('/stock/');
 
 const AdminDashboard = () => {
   const { user } = (useAuth() as any) || {};
   const roleId: number = user?.role_id ?? 99;
   const showRecentActivities = roleId <= 1; // Super Admin (0) and Admin (1)
   const showRecentEvents = roleId > 1; // Everyone else that can access dashboard
-  // Fetch bookings data
+  
+  // --- Chart state ---
+  const [seriesGranularity, setSeriesGranularity] = React.useState<'day' | 'month' | 'year'>('month');
+  const [pieScope, setPieScope] = React.useState<'month' | 'year'>('month');
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = React.useState<number>(now.getMonth()); // 0-11
+  const [selectedYear, setSelectedYear] = React.useState<number>(now.getFullYear());
+  const MONTHS = [
+    'January','February','March','April','May','June','July','August','September','October','November','December'
+  ];
+  
+  // Fetch both public and employee bookings
   const { data: bookings, isLoading: isLoadingBookings } = useQuery<Booking[]>({
     queryKey: ['adminBookings'],
     queryFn: fetchBookings,
+  });
+
+  const { data: employeeBookings, isLoading: isLoadingEmployeeBookings } = useQuery<EmployeeBooking[]>({
+    queryKey: ['adminEmployeeBookings'],
+    queryFn: fetchEmployeeBookings,
   });
 
   // Fetch rituals data
@@ -78,10 +104,23 @@ const AdminDashboard = () => {
     queryFn: fetchRituals,
   });
 
-  // Calculate stats from real data
-  const totalBookings = bookings?.length || 0;
+  // Fetch stock data
+  const { data: stockItems, isLoading: isLoadingStock } = useQuery<StockItem[]>({
+    queryKey: ['adminStockItems'],
+    queryFn: fetchStockItems,
+  });
+
+  // Calculate combined stats from both booking types
+  const totalBookings = (bookings?.length || 0) + (employeeBookings?.length || 0);
   const totalRituals = rituals?.length || 0;
-  const totalRevenue = bookings?.reduce((sum, booking) => sum + booking.total_cost, 0) || 0;
+  const publicRevenue = bookings?.reduce((sum, booking) => sum + booking.total_cost, 0) || 0;
+  const employeeRevenue = employeeBookings?.reduce((sum, booking) => sum + booking.total_cost, 0) || 0;
+  const totalRevenue = publicRevenue + employeeRevenue;
+  
+  // Calculate stock stats
+  const totalStockItems = stockItems?.length || 0;
+  const totalStockQuantity = stockItems?.reduce((sum, item) => sum + item.quantity, 0) || 0;
+  const lowStockItems = stockItems?.filter(item => item.quantity < 10).length || 0;
   
   // Derive "upcoming" rituals from actual rituals list.
   // Since scheduling data isn't provided by the API, we surface popular rituals first then fall back to the first few.
@@ -120,8 +159,8 @@ const AdminDashboard = () => {
     },
     {
       title: "Stock Items",
-      value: "156",
-      change: "-2.3%",
+      value: totalStockItems.toString(),
+      change: lowStockItems > 0 ? `${lowStockItems} low stock` : "All stocked",
       icon: Package,
       color: "text-blue-400",
       bgColor: "bg-blue-400/20",
@@ -196,7 +235,90 @@ const AdminDashboard = () => {
     return '/admin/activity';
   };
 
-  if (isLoadingBookings || isLoadingRituals) {
+  // --- Helpers for analytics ---
+  const objectIdToDate = (id: string) => new Date(parseInt(id?.substring(0, 8), 16) * 1000);
+  const bookingVolume = (b: { instances: RitualInstance[] }) => b.instances?.reduce((s, i) => s + (Number(i.quantity) || 0), 0) || 0;
+  const mergedBookings: Array<Booking | EmployeeBooking> = [
+    ...(bookings || []),
+    ...(employeeBookings || []),
+  ];
+  type BucketItem = { bucket: string; date: Date; volume: number };
+  const formatBucket = (d: Date, gran: 'day' | 'month' | 'year') => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    if (gran === 'day') return `${yyyy}-${mm}-${dd}`;
+    if (gran === 'month') return `${yyyy}-${mm}`;
+    return `${yyyy}`;
+  };
+  const seriesData: BucketItem[] = React.useMemo(() => {
+    const map = new Map<string, BucketItem>();
+    for (const b of mergedBookings) {
+      const d = objectIdToDate((b as any)._id);
+      if (isNaN(d.getTime())) continue;
+      const key = formatBucket(d, seriesGranularity);
+      const prev = map.get(key);
+      const vol = bookingVolume(b as any);
+      if (prev) {
+        prev.volume += vol;
+      } else {
+        map.set(key, { bucket: key, date: d, volume: vol });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.date.getTime() - b.date.getTime());
+  }, [mergedBookings, seriesGranularity]);
+
+  const formatBucketLabel = (label: string, gran: 'day' | 'month' | 'year') => {
+    try {
+      if (gran === 'year') return label;
+      if (gran === 'month') {
+        const [y, m] = label.split('-').map(Number);
+        const d = new Date(y, m - 1, 1);
+        return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+      }
+      // day
+      const [y, m, d] = label.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      return dt.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch {
+      return label;
+    }
+  };
+
+  // Pie data: most booked rituals (by quantity), within current month or current year
+  const pieData = React.useMemo(() => {
+    const count = new Map<string, number>();
+    for (const b of mergedBookings) {
+      const d = objectIdToDate((b as any)._id);
+      if (isNaN(d.getTime())) continue;
+      if (pieScope === 'month') {
+        if (d.getFullYear() !== selectedYear || d.getMonth() !== selectedMonth) continue;
+      } else {
+        if (d.getFullYear() !== selectedYear) continue;
+      }
+      for (const inst of (b as any).instances || []) {
+        const name = inst.ritualName || 'Unknown';
+        const qty = Number(inst.quantity) || 0;
+        count.set(name, (count.get(name) || 0) + qty);
+      }
+    }
+    const arr = Array.from(count.entries()).map(([name, value]) => ({ name, value }));
+    arr.sort((a, b) => b.value - a.value);
+    // Limit to top 8 and bucket the rest as "Others"
+    const top = arr.slice(0, 8);
+    const rest = arr.slice(8);
+    const restSum = rest.reduce((s, r) => s + r.value, 0);
+    return restSum > 0 ? [...top, { name: 'Others', value: restSum }] : top;
+  }, [mergedBookings, pieScope, selectedMonth, selectedYear]);
+
+  
+
+  const PIE_COLORS = [
+    '#7c3aed', '#06b6d4', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#22c55e', '#eab308', '#3b82f6', '#f97316'
+  ];
+
+  // After all hooks have been called consistently, we can conditionally render a loader
+  if (isLoadingBookings || isLoadingEmployeeBookings || isLoadingRituals || isLoadingStock) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-purple-400">Loading dashboard data...</div>
@@ -248,6 +370,156 @@ const AdminDashboard = () => {
             </Link>
           ) : inner;
         })}
+      </div>
+
+      {/* Analytics Grid: Bookings over time and Most booked rituals */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Bookings Over Time */}
+        <Card className="bg-slate-900/80 backdrop-blur-sm border-purple-500/30 shadow-lg shadow-purple-500/10 hover:shadow-purple-500/20 ring-1 ring-purple-500/10">
+          <CardHeader className="flex flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-purple-300">
+                <TrendingUp className="h-5 w-5" />
+                Rituals booked over time
+              </CardTitle>
+              <CardDescription className="text-purple-400/80">
+                Total rituals booked per {seriesGranularity}
+              </CardDescription>
+            </div>
+            <ToggleGroup type="single" value={seriesGranularity} onValueChange={(v) => v && setSeriesGranularity(v as any)}>
+              <ToggleGroupItem value="day">Day</ToggleGroupItem>
+              <ToggleGroupItem value="month">Month</ToggleGroupItem>
+              <ToggleGroupItem value="year">Year</ToggleGroupItem>
+            </ToggleGroup>
+          </CardHeader>
+          <CardContent>
+            {seriesData.length === 0 ? (
+              <div className="text-sm text-purple-300/80">No booking data yet.</div>
+            ) : (
+              <div className="relative h-80">
+                <ChartContainer
+                  className="h-full"
+                  config={{ volume: { label: 'Rituals booked', color: 'hsl(280 100% 70%)' } }}
+                >
+                  <AreaChart data={seriesData} margin={{ left: 12, right: 12, top: 10 }}>
+                    <defs>
+                      <linearGradient id="volumeGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.6} />
+                        <stop offset="100%" stopColor="#7c3aed" stopOpacity={0.08} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.25} />
+                    <XAxis
+                      dataKey="bucket"
+                      tick={{ fill: 'currentColor' }}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis tick={{ fill: 'currentColor' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                    <ChartTooltip
+                      content={<ChartTooltipContent
+                        nameKey="volume"
+                        labelFormatter={(val) => formatBucketLabel(String(val), seriesGranularity)}
+                        formatter={(value) => (
+                          <div className="flex w-full items-center justify-between">
+                            <span className="text-muted-foreground">Rituals</span>
+                            <span className="font-mono font-medium">{Number(value).toLocaleString()}</span>
+                          </div>
+                        )}
+                      />}
+                    />
+                    <Area type="monotone" dataKey="volume" stroke="#a78bfa" fill="url(#volumeGradient)" strokeWidth={2.5} dot={{ r: 2 }} activeDot={{ r: 4 }} isAnimationActive />
+                  </AreaChart>
+                </ChartContainer>
+                {/* Decorative glow */}
+                <div className="pointer-events-none absolute -inset-6 -z-10 rounded-2xl bg-[radial-gradient(ellipse_at_top,rgba(124,58,237,0.15),transparent_60%)]" />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Most Booked Rituals */}
+        <Card className="bg-slate-900/80 backdrop-blur-sm border-purple-500/30 shadow-lg shadow-purple-500/10 hover:shadow-purple-500/20 ring-1 ring-purple-500/10">
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-purple-300">
+                <Star className="h-5 w-5" />
+                Most booked rituals
+              </CardTitle>
+              <CardDescription className="text-purple-400/80">
+                {pieScope === 'month' ? (
+                  <>Top rituals in {MONTHS[selectedMonth]} {selectedYear}</>
+                ) : (
+                  <>Top rituals in {selectedYear}</>
+                )}
+              </CardDescription>
+            </div>
+            {/* Responsive controls container */}
+            <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:items-center">
+              <ToggleGroup 
+                type="single" 
+                value={pieScope} 
+                onValueChange={(v) => v && setPieScope(v as any)} 
+                className="[&>button]:flex-1 sm:[&>button]:flex-initial"
+              >
+                <ToggleGroupItem value="month">Month</ToggleGroupItem>
+                <ToggleGroupItem value="year">Year</ToggleGroupItem>
+              </ToggleGroup>
+              <div className="flex w-full items-center gap-2 sm:w-auto">
+                {pieScope === 'month' && (
+                  <Select value={String(selectedMonth)} onValueChange={(v) => setSelectedMonth(Number(v))}>
+                    <SelectTrigger className="w-full sm:w-[9.5rem]">
+                      <SelectValue placeholder="Select month" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MONTHS.map((m, idx) => (
+                        <SelectItem key={m} value={String(idx)}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(Number(v))}>
+                  <SelectTrigger className="w-full sm:w-[6.5rem]">
+                    <SelectValue placeholder="Year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 5 }).map((_, i) => {
+                      const y = now.getFullYear() - 2 + i; // prev 2, current, next 2
+                      return <SelectItem key={y} value={String(y)}>{y}</SelectItem>;
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {pieData.length === 0 ? (
+              <div className="text-sm text-purple-300/80">No ritual data to display.</div>
+            ) : (
+              <div className="relative h-80">
+                <ChartContainer className="h-full" config={{}}>
+                  <PieChart>
+                    <Pie data={pieData} dataKey="value" nameKey="name" outerRadius={110} innerRadius={58} stroke="#1f1f2b" strokeWidth={1} isAnimationActive>
+                      {pieData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <ChartTooltip
+                      content={<ChartTooltipContent formatter={(value, name) => (
+                        <div className="flex w-full items-center justify-between">
+                          <span className="text-muted-foreground">{String(name)}</span>
+                          <span className="font-mono font-medium">{Number(value).toLocaleString()}</span>
+                        </div>
+                      )} />}
+                    />
+                  </PieChart>
+                </ChartContainer>
+                {/* Decorative glow */}
+                <div className="pointer-events-none absolute -inset-6 -z-10 rounded-2xl bg-[radial-gradient(ellipse_at_top,rgba(124,58,237,0.15),transparent_60%)]" />
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Main Content Grid */}
@@ -365,11 +637,13 @@ const AdminDashboard = () => {
                       <p className="text-xs text-purple-300">₹{ritual.price.toLocaleString()}</p>
                     </div>
                   </div>
-                  <div className={`px-2 py-1 rounded-full text-[10px] font-medium ${
-                    ritual.popular
-                      ? 'bg-green-900/30 text-green-400 border border-green-400/30'
-                      : 'bg-yellow-900/30 text-yellow-400 border border-yellow-400/30'
-                  }`}>
+                  <div
+                    className={`px-2 py-1 rounded-full text-[10px] font-medium ${
+                      ritual.popular
+                        ? 'bg-green-600 text-white border border-green-400'
+                        : 'bg-yellow-500 text-black border border-yellow-300'
+                    }`}
+                  >
                     {ritual.popular ? 'Popular' : 'Ritual'}
                   </div>
                 </Link>
@@ -386,6 +660,8 @@ const AdminDashboard = () => {
           </CardContent>
         </Card>
       </div>
+
+      
 
       {/* Quick Actions */}
       <Card className="bg-slate-900/80 backdrop-blur-sm border-purple-500/30 shadow-lg shadow-purple-500/10">

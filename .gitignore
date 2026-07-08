@@ -1,4 +1,6 @@
+# ==============================
 # Logs
+# ==============================
 logs
 *.log
 npm-debug.log*
@@ -7,30 +9,189 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Build artifacts & dependencies (ignore everywhere)
+# ==============================
+# Node / Frontend build artifacts
+# ==============================
 **/node_modules/
 **/dist/
 **/dist-ssr/
-*.local
+**/build/
 
-# Editor directories and files
+# ==============================
+# Python / Backend
+# ==============================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+
+# ==============================
+# Environment files
+# ==============================
+**/.env
+**/.env.*
+*.env
+
+# ==============================
+# Editors / IDEs
+# ==============================
+# VSCode
 .vscode/*
 !.vscode/extensions.json
-**/.idea/
-**/.DS_Store
+
+# IntelliJ / WebStorm
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Mac / misc
+.DS_Store
 *.suo
-.ntvs
+*.ntvs
 *.njsproj
 *.sln
 *.sw?
-__pycache__/
-*.pyc
 
-# Folers
+# ==============================
+# Flutter / Dart
+# ==============================
+# Flutter/Dart/Pub related
+**/.dart_tool/
+**/.pub/
+**/.pub-cache/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/doc/api/
+**/ios/Flutter/.last_build_id
+**/build/
+**/coverage/
+**/generated_plugin_registrant.*
+
+# Android related
+**/android/**/gradle-wrapper.jar
+**/android/.gradle
+**/android/captures/
+**/android/gradlew
+**/android/gradlew.bat
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+
+# iOS related
+**/ios/**/*.mode1v3
+**/ios/**/*.mode2v3
+**/ios/**/*.moved-aside
+**/ios/**/*.pbxuser
+**/ios/**/*.perspectivev3
+**/ios/**/*sync/
+**/ios/**/.sconsign.dblite
+**/ios/**/DerivedData/
+**/ios/**/Icon?
+**/ios/**/.symlinks/
+**/ios/**/profile
+**/ios/**/xcuserdata
+**/ios/.generated/
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/app.flx
+**/ios/Flutter/app.zip
+**/ios/Flutter/flutter_assets/
+
+# macOS
+**/macos/Flutter/GeneratedPluginRegistrant.swift
+**/macos/Flutter/ephemeral
+**/macos/Flutter/.last_build_id
+**/macos/**/Pods/
+**/macos/**/.symlinks/
+**/macos/**/xcuserdata
+**/macos/**/DerivedData/
+
+# Linux
+**/linux/flutter/ephemeral
+**/linux/.last_build_id
+
+# Windows
+**/windows/flutter/ephemeral
+**/windows/.last_build_id
+
+# Web
+**/web/icons/Icon-*
+**/web/icons/Icon-maskable-*
+
+# ==============================
+# Misc / other
+# ==============================
+*.class
+*.log
+*.pyc
+*.swp
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
 backend/profile/
-API_Security_Documentation.md
-API_Security_Setup.md
-PRODUCTION_DEPLOYMENT.md
-PRODUCTION_SECURITY.md
-NETLIFY_SECURITY_CONFIG.md
-JWT_SECURITY_IMPLEMENTATION.md
+backend/backups/
+backend/mongodb-database-tools-debian10-x86_64-100.13.0.deb
+OTP_RESEND_FEATURE.md
+LOGOUT_COOLDOWN_SUMMARY.md
+LOGOUT_COOLDOWN_CLEAR.md
+app.*.symbols
+app.*.map.json
+# Markdown files (except README.md)
+DEPENDENCY_SECURITY_AUDIT.md
+GPS_ATTENDANCE_IMPLEMENTATION.md
+GPS_QUICK_START.md
+LOCATION_MANAGEMENT_FIX.md
+LOCATION_SETUP_GUIDE.md
+MALAYALAM_AUTO_DETECTION.md
+MALAYALAM_FONT_FIX.md
+NAKSHATRAPOOJA_FEATURE.md
+PDF_DOWNLOAD_FEATURE.md
+PDF_DOWNLOAD_QUICK_GUIDE.md
+PDF_EXPORT_UPDATES.md
+PRIEST_ATTENDANCE_ACCESS_UPDATE.md
+PRIEST_ATTENDANCE_COMPLETE.md
+PRIEST_ATTENDANCE_DATE_FIX.md
+PRIEST_ATTENDANCE_SYSTEM.md
+SECURITY_EXECUTIVE_SUMMARY.md
+STOCK_MANAGEMENT_ENHANCEMENTS.md
+SYNC_TRACKING_IMPLEMENTATION.md
+VIDEO_INTRO_IMPLEMENTATION.md
+VIDEO_PLAYS_EVERY_TIME.md
+VIDEO_TROUBLESHOOTING.md
+backend/CODING_STANDARDS.md
+backend/SECURITY_FIXES_REPORT.md
+backend/SECURITY_SUMMARY.md
+frontend/src/docs/spiritual-calendar-design.md
+temple_app/docs/BACKEND_FIX_CORS.md
+temple_app/docs/BACKEND_INTEGRATION.md
+temple_app/docs/CORS_AND_MOBILE.md
+temple_app/docs/FINAL_SUMMARY.md
+temple_app/docs/INTEGRATION_SUMMARY.md
+temple_app/docs/QUICK_START.md
+temple_app/docs/TESTING_GUIDE.md
+temple_app/docs/URGENT_BACKEND_FIX.md
+ARCHITECTURE_DIAGRAM.md
+DEPLOYMENT_CHECKLIST.md
+DOCKER_GUIDE.md
+DOCKER_ISSUES.md
+DOCKER_QUICK_START.md
+DUAL_BACKEND_CONFIG.md
+FLUTTER_DYNAMIC_CONFIG.md
+IMPLEMENTATION_SUMMARY_COMPLETE.md
+IMPLEMENTATION_SUMMARY.md
+MANUAL_PORT_FEATURE.md
+QUICK_FIX_GUIDE.md
+QUICK_REFERENCE.md
+QUICKSTART_SPLIT.md
+SPLIT_BACKEND_GUIDE.md
+TOKEN_PERSISTENCE_IMPLEMENTATION.md
+/venv
+/sqlmap

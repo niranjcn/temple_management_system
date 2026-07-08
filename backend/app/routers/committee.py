@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Body, HTTPException, status, Depends, UploadFile, File
-from fastapi.responses import Response
+from fastapi import APIRouter, Body, HTTPException, status, Depends
+from fastapi.responses import RedirectResponse
 from typing import List
 from ..services import committee_service, auth_service
 from ..models import CommitteeMemberCreate, CommitteeMemberInDB
+from ..models.upload_models import SignedUploadRequest, SignedUploadResponse, UploadFinalizeRequest
 from ..services.activity_service import create_activity
 from ..models.activity_models import ActivityCreate
 from datetime import datetime
@@ -18,50 +19,70 @@ async def list_all_committee_members():
     """
     return await committee_service.get_all_committee_members()
 
-@router.post("/upload", response_description="Upload committee member image")
-async def upload_committee_image(
-    file: UploadFile = File(...),
+@router.post("/get_signed_upload", response_description="Get signed upload for committee image", response_model=SignedUploadResponse)
+async def get_signed_upload_for_committee(
+    payload: SignedUploadRequest,
     current_admin: dict = Depends(auth_service.get_current_admin)
 ):
-    """
-    Upload a committee member image to MinIO (gallery bucket) and return the public URL path.
-    Requires role_id <= 1.
-    """
+    """Issue a signed Cloudinary upload request for committee images (role_id <= 1)."""
     if int(current_admin.get("role_id", 99)) > 1:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    content = await file.read()
-    object_path, public_url = storage_service.upload_image_to_bucket(
-        storage_service.gallery_bucket,  # reusing gallery bucket for simplicity
-        file,
-        content,
+    signature = storage_service.prepare_signed_upload(
+        route_key="committee",
+        filename=payload.filename,
         prefix="committee",
-        validate=False
     )
 
-    # Log activity
-    await create_activity(ActivityCreate(
-        username=current_admin["username"],
-        role=current_admin["role"],
-        activity=f"Uploaded a committee member image: {file.filename}.",
-        timestamp=datetime.utcnow()
-    ))
+    await create_activity(
+        ActivityCreate(
+            username=current_admin["username"],
+            role=current_admin["role"],
+            activity=f"Issued committee upload signature for '{payload.filename}'.",
+            timestamp=datetime.utcnow(),
+        )
+    )
 
-    return {"path": object_path, "url": public_url}
+    return SignedUploadResponse(**signature)
+
+@router.post("/finalize_upload", response_model=dict)
+async def finalize_committee_upload(
+    metadata: UploadFinalizeRequest,
+    current_admin: dict = Depends(auth_service.get_current_admin)
+):
+    """Validate and return the public URL for an uploaded committee image."""
+    if int(current_admin.get("role_id", 99)) > 1:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    expected_public_id = storage_service.build_public_id(storage_service.gallery_bucket, metadata.object_path)
+    if metadata.public_id != expected_public_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Upload verification failed")
+
+    public_url = metadata.object_path
+
+    await create_activity(
+        ActivityCreate(
+            username=current_admin["username"],
+            role=current_admin["role"],
+            activity=f"Finalized committee image upload for '{metadata.object_path}'.",
+            timestamp=datetime.utcnow(),
+        )
+    )
+
+    return {"public_url": public_url}
 
 @router.get("/files/{object_path:path}")
 async def serve_committee_file(object_path: str):
     """
-    Serve committee images from MinIO gallery bucket with proper headers.
+    Serve committee images from Cloudinary-backed storage with proper headers.
     """
     decoded_path = unquote(object_path)
-    content, content_type, _ = storage_service.get_file_from_bucket(storage_service.gallery_bucket, decoded_path)
-    return Response(
-        content=content,
-        media_type=content_type,
+    url = storage_service.get_signed_url_for_bucket(storage_service.gallery_bucket, decoded_path)
+    return RedirectResponse(
+        url,
+        status_code=302,
         headers={
             "Cache-Control": "public, max-age=3600",
-            "ETag": f'"{decoded_path}"',
         }
     )
 

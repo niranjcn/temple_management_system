@@ -1,0 +1,215 @@
+Run started:2025-10-22 11:04:13.496438
+
+Test results:
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: 'access'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b106_hardcoded_password_funcarg.html
+   Location: ./app/middleware/enhanced_jwt_auth_middleware.py:114:28
+113	            # Verify token with enhanced security
+114	            payload = await enhanced_jwt_security.verify_token(
+115	                token, 
+116	                token_type="access", 
+117	                client_info=client_info, 
+118	                device_fingerprint=device_fingerprint
+119	            )
+120	            
+
+--------------------------------------------------
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: 'refresh'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b106_hardcoded_password_funcarg.html
+   Location: ./app/routers/auth.py:209:18
+208	    try:
+209	        payload = jwt_security.verify_token(refresh_token_value, token_type="refresh", client_info=client_info)
+210	    except HTTPException:
+
+--------------------------------------------------
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: 'refresh'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b106_hardcoded_password_funcarg.html
+   Location: ./app/routers/auth.py:301:22
+300	        try:
+301	            payload = jwt_security.verify_token(refresh_token_value, token_type="refresh", client_info=client_info)
+302	            jti = payload.get("jti")
+
+--------------------------------------------------
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: 'access'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b106_hardcoded_password_funcarg.html
+   Location: ./app/routers/auth.py:360:18
+359	    try:
+360	        payload = jwt_security.verify_token(token, token_type="access", client_info=client_info)
+361	    except Exception as e:
+
+--------------------------------------------------
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: 'access'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b106_hardcoded_password_funcarg.html
+   Location: ./app/services/auth_service.py:101:22
+100	            client_info = jwt_security.get_client_info(request)
+101	            payload = jwt_security.verify_token(token, token_type="access", client_info=client_info)
+102	
+
+--------------------------------------------------
+>> Issue: [B404:blacklist] Consider possible security implications associated with the subprocess module.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/blacklists/blacklist_imports.html#b404-import-subprocess
+   Location: ./app/services/backup_service.py:8:0
+7	from pathlib import Path
+8	import subprocess
+9	from bson import decode_all, ObjectId
+
+--------------------------------------------------
+>> Issue: [B603:subprocess_without_shell_equals_true] subprocess call - check for execution of untrusted input.
+   Severity: Low   Confidence: High
+   CWE: CWE-78 (https://cwe.mitre.org/data/definitions/78.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b603_subprocess_without_shell_equals_true.html
+   Location: ./app/services/backup_service.py:119:21
+118	            # subprocess.run with list args (no shell=True) is secure against injection
+119	            result = subprocess.run(
+120	                dump_command,
+121	                capture_output=True,
+122	                text=True,
+123	                timeout=300,  # 5 minute timeout
+124	                check=False  # Explicitly handle return codes
+125	            )
+126	            
+
+--------------------------------------------------
+>> Issue: [B608:hardcoded_sql_expressions] Possible SQL injection vector through string-based query construction.
+   Severity: Medium   Confidence: Low
+   CWE: CWE-89 (https://cwe.mitre.org/data/definitions/89.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b608_hardcoded_sql_expressions.html
+   Location: ./app/services/cleanup_service.py:193:34
+192	                try:
+193	                    logger.info(f"  Attempting to delete from {collection_name}...")
+194	                    # Note: MongoDB delete_many({}) is safe - not SQL injection
+
+--------------------------------------------------
+>> Issue: [B608:hardcoded_sql_expressions] Possible SQL injection vector through string-based query construction.
+   Severity: Medium   Confidence: Low
+   CWE: CWE-89 (https://cwe.mitre.org/data/definitions/89.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b608_hardcoded_sql_expressions.html
+   Location: ./app/services/cleanup_service.py:231:34
+230	                try:
+231	                    logger.info(f"  Attempting to delete from remote {collection_name}...")
+232	                    remote_collection = self.remote_db.get_collection(collection_name)
+
+--------------------------------------------------
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: 'access'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b106_hardcoded_password_funcarg.html
+   Location: ./app/services/enhanced_jwt_security_service.py:123:36
+122	                import asyncio
+123	                asyncio.create_task(db_security.store_encrypted_token(
+124	                    token=token,
+125	                    user_id=data.get("sub", "unknown"),
+126	                    token_type="access",
+127	                    expires_at=expire.replace(tzinfo=None),
+128	                    metadata={"role_id": role_id}  # Minimal metadata to save memory
+129	                ))
+130	            except Exception as e:
+
+--------------------------------------------------
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: 'refresh'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b106_hardcoded_password_funcarg.html
+   Location: ./app/services/enhanced_jwt_security_service.py:174:36
+173	                import asyncio
+174	                asyncio.create_task(db_security.store_encrypted_token(
+175	                    token=token,
+176	                    user_id=data.get("sub", "unknown"),
+177	                    token_type="refresh",
+178	                    expires_at=expire.replace(tzinfo=None),
+179	                    metadata={"role_id": role_id}  # Minimal metadata only
+180	                ))
+181	            except Exception as e:
+
+--------------------------------------------------
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: 'refresh'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b106_hardcoded_password_funcarg.html
+   Location: ./app/services/enhanced_jwt_security_service.py:292:24
+291	        # Verify refresh token
+292	        payload = await self.verify_token(refresh_token, token_type="refresh", 
+293	                                        client_info=client_info, device_fingerprint=device_fingerprint)
+294	        
+
+--------------------------------------------------
+>> Issue: [B107:hardcoded_password_default] Possible hardcoded password: 'access'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b107_hardcoded_password_default.html
+   Location: ./app/services/jwt_security_service.py:85:4
+84	    
+85	    def verify_token(self, token: str, token_type: str = "access", client_info: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+86	        """Verify and decode JWT token"""
+87	        try:
+88	            payload = jwt.decode(
+89	                token, 
+90	                self.secret_key, 
+91	                algorithms=[self.algorithm],
+92	                audience=self.audience
+93	            )
+94	            
+95	            # Check token type
+96	            if payload.get("type") != token_type:
+97	                raise HTTPException(status_code=401, detail="Invalid token type")
+98	            
+99	            # Verify client binding if enabled and present
+100	            if self.bind_to_client and client_info and "client_hash" in payload:
+101	                expected_hash = hashlib.sha256(
+102	                    f"{client_info.get('ip', '')}{client_info.get('user_agent', '')}".encode()
+103	                ).hexdigest()[:16]
+104	
+105	                if payload["client_hash"] != expected_hash:
+106	                    raise HTTPException(status_code=401, detail="Token bound to different client")
+107	            
+108	            return payload
+109	            
+110	        except ExpiredSignatureError:
+111	            raise HTTPException(status_code=401, detail="Token has expired")
+112	        except InvalidTokenError:
+113	            raise HTTPException(status_code=401, detail="Invalid token")
+114	        except Exception as e:
+115	            raise HTTPException(status_code=401, detail="Token validation failed")
+116	    
+
+--------------------------------------------------
+>> Issue: [B106:hardcoded_password_funcarg] Possible hardcoded password: 'refresh'
+   Severity: Low   Confidence: Medium
+   CWE: CWE-259 (https://cwe.mitre.org/data/definitions/259.html)
+   More Info: https://bandit.readthedocs.io/en/1.8.6/plugins/b106_hardcoded_password_funcarg.html
+   Location: ./app/services/jwt_security_service.py:135:18
+134	        """Generate a new access token and rotated refresh token using the provided refresh token."""
+135	        payload = self.verify_token(refresh_token, token_type="refresh", client_info=client_info)
+136	
+
+--------------------------------------------------
+
+Code scanned:
+	Total lines of code: 12029
+	Total lines skipped (#nosec): 0
+	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 0
+
+Run metrics:
+	Total issues (by severity):
+		Undefined: 0
+		Low: 12
+		Medium: 2
+		High: 0
+	Total issues (by confidence):
+		Undefined: 0
+		Low: 2
+		Medium: 10
+		High: 2
+Files skipped (0):

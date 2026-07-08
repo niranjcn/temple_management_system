@@ -3,16 +3,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Trash2, Edit, Calendar, MapPin, Clock, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-import { get, API_BASE_URL } from '@/api/api';
+import { get, post } from '@/api/api';
 import api from '@/api/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { resolveImageUrl } from '@/lib/utils';
+import { requestSignedUpload, uploadFileToCloudinary } from '@/lib/cloudinary';
 
 // Define the shape of an event object
 interface Event {
@@ -25,6 +25,7 @@ interface Event {
     image: string;
 }
 interface FeaturedEvent { event_id: string | null }
+interface EventsSectionSelection { event_ids: string[] }
 
 // Fetch all events
 const fetchEvents = async (): Promise<Event[]> => {
@@ -44,6 +45,8 @@ const ManageEvents = () => {
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [selectedFileName, setSelectedFileName] = useState<string>('');
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const [mutatingEventId, setMutatingEventId] = useState<string | null>(null);
+
 
     useEffect(() => {
         if (isEditing) {
@@ -74,26 +77,34 @@ const ManageEvents = () => {
     });
     const { data: featured, refetch: refetchFeatured } = useQuery<FeaturedEvent>({
         queryKey: ['featuredEvent'],
-        queryFn: async () => {
-            const res = await fetch(`${API_BASE_URL}/api/featured-event/`);
-            if (!res.ok) return { event_id: null };
-            return res.json();
-        },
+        queryFn: () => get<FeaturedEvent>('/featured-event/').catch(() => ({ event_id: null })),
         staleTime: 5 * 60 * 1000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
         refetchOnMount: false,
     });
 
+    // Events Section selection
+    const { data: sectionSelection } = useQuery<EventsSectionSelection>({
+        queryKey: ['eventsSectionSelection'],
+        queryFn: () => get<EventsSectionSelection>('/events-section/').catch(() => ({ event_ids: [] })),
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
+        refetchOnMount: false,
+    });
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    useEffect(() => {
+        setSelectedIds(sectionSelection?.event_ids ?? []);
+    }, [sectionSelection]);
+
     const mutation = useMutation({
         mutationFn: (eventPayload: Omit<Event, '_id'>) => {
-            const token = localStorage.getItem('token');
-            const config = { headers: { Authorization: `Bearer ${token}` } };
             if (roleId > 3) throw new Error('Not authorized');
             if (isEditing) {
-                return api.put(`/events/${isEditing._id}`, eventPayload, config);
+                return api.put(`/events/${isEditing._id}`, eventPayload);
             }
-            return api.post('/events/', eventPayload, config);
+            return api.post('/events/', eventPayload);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['adminEvents'] });
@@ -110,10 +121,8 @@ const ManageEvents = () => {
     
     const deleteMutation = useMutation({
         mutationFn: (id: string) => {
-            const token = localStorage.getItem('token');
-            const config = { headers: { Authorization: `Bearer ${token}` } };
             if (roleId > 3) throw new Error('Not authorized');
-            return api.delete(`/events/${id}`, config);
+            return api.delete(`/events/${id}`);
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['adminEvents'] });
@@ -124,15 +133,9 @@ const ManageEvents = () => {
     });
 
     const setFeaturedMutation = useMutation({
-        mutationFn: async (event_id: string | null) => {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_BASE_URL}/api/featured-event/`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token ?? ''}` },
-                body: JSON.stringify({ event_id }),
-            });
-            if (!res.ok) throw new Error('Failed to set featured');
-            return res.json();
+        mutationFn: (event_id: string | null) => {
+            if (roleId > 3) throw new Error('Not authorized');
+            return api.post('/featured-event/', { event_id });
         },
         onSuccess: () => {
             toast.success('Featured event updated');
@@ -141,6 +144,35 @@ const ManageEvents = () => {
         },
         onError: () => toast.error('Failed to update featured event'),
     });
+
+    const saveSectionMutation = useMutation({
+        mutationFn: (payload: { event_ids: string[] }) => {
+            if (roleId > 3) throw new Error('Not authorized');
+            return api.post('/events-section/', payload);
+        },
+        onSuccess: () => {
+            toast.success('Homepage events section updated');
+        },
+        onError: () => {
+            toast.error('Failed to update events section');
+        },
+        onSettled: () => {
+            setMutatingEventId(null);
+            queryClient.invalidateQueries({ queryKey: ['eventsSectionSelection'] });
+        }
+    });
+
+    const toggleInSection = (id: string) => {
+        if (isReadOnly) { toast.error('You are not authorized to modify events.'); return; }
+        if (saveSectionMutation.isPending) return;
+
+        setMutatingEventId(id);
+        const newSelectedIds = selectedIds.includes(id) 
+            ? selectedIds.filter(x => x !== id) 
+            : [...selectedIds, id];
+        
+        saveSectionMutation.mutate({ event_ids: newSelectedIds });
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -153,27 +185,31 @@ const ManageEvents = () => {
             setUploading(true);
             setUploadError(null);
             try {
-                const token = localStorage.getItem('token');
-                const form = new FormData();
-                form.append('file', selectedFile);
-                const res = await fetch(`${API_BASE_URL}/api/events/upload`, {
-                    method: 'POST',
-                    headers: {
-                        Authorization: `Bearer ${token ?? ''}`,
-                    },
-                    body: form,
-                });
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err?.detail || 'Upload failed');
+                const signed = await requestSignedUpload('/events/get_signed_upload', selectedFile);
+
+                if (selectedFile.size > signed.max_file_bytes) {
+                    throw new Error('Image exceeds the 2 MB limit.');
                 }
-                const data = await res.json();
-                imageUrl = data.url;
+
+                const cloudinaryResult = await uploadFileToCloudinary(signed, selectedFile);
+
+                const finalizePayload = {
+                    object_path: signed.object_path,
+                    public_id: cloudinaryResult.public_id,
+                    secure_url: cloudinaryResult.secure_url,
+                    format: cloudinaryResult.format,
+                    bytes: cloudinaryResult.bytes,
+                    version: cloudinaryResult.version ? String(cloudinaryResult.version) : undefined,
+                };
+
+                const finalizeResponse = await post<{ public_url: string }, typeof finalizePayload>('/events/finalize_upload', finalizePayload);
+                imageUrl = finalizeResponse.public_url;
                 toast.success('Image uploaded');
             } catch (err: any) {
                 console.error(err);
-                setUploadError(err?.message || 'Upload failed');
-                toast.error('Image upload failed');
+                const errorMsg = err?.response?.data?.detail || err?.message || 'Upload failed';
+                setUploadError(errorMsg);
+                toast.error(`Image upload failed: ${errorMsg}`);
                 setUploading(false);
                 return;
             } finally {
@@ -219,11 +255,18 @@ const ManageEvents = () => {
         <div className="space-y-6">
                         <div className="flex items-center justify-between gap-4 flex-wrap">
                             <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">Manage Events</h1>
-                            <Link to={{ pathname: '/events' }} state={{ fromAdmin: '/admin/events' }} className="inline-flex">
-                                <Button variant="outline" className="border-purple-500/30 text-purple-300 hover:bg-purple-900/50">
-                                    View Public Events <ExternalLink className="ml-2 h-4 w-4" />
-                                </Button>
-                            </Link>
+                            <div className="flex items-center gap-2">
+                                <Link to={{ pathname: '/events' }} state={{ fromAdmin: '/admin/events' }} className="inline-flex">
+                                    <Button variant="outline" className="border-purple-500/30 text-purple-300 hover:bg-purple-900/50">
+                                        View Public Events <ExternalLink className="ml-2 h-4 w-4" />
+                                    </Button>
+                                </Link>
+                                <Link to={{ pathname: '/' }} state={{ fromAdmin: '/admin/events', scrollTo: 'events' }} className="inline-flex">
+                                    <Button variant="outline" className="border-purple-500/30 text-purple-300 hover:bg-purple-900/50">
+                                        View Events Section <ExternalLink className="ml-2 h-4 w-4" />
+                                    </Button>
+                                </Link>
+                            </div>
                         </div>
             
             {/* Stats Cards */}
@@ -295,11 +338,11 @@ const ManageEvents = () => {
                                 required 
                             />
                            <Input 
-                                placeholder="Time (e.g., 6:00 PM)" 
+                                type="time" 
                                 value={formData.time} 
                                 onChange={(e) => setFormData({ ...formData, time: e.target.value })}
                                 disabled={isReadOnly}
-                                className="bg-slate-800/50 border-purple-500/30 text-white placeholder-purple-300/70"
+                                className="bg-slate-800/50 border-purple-500/30 text-white"
                                 required 
                             />
                         </div>
@@ -340,9 +383,11 @@ const ManageEvents = () => {
             {isLoading ? <p className="text-purple-300">Loading...</p> : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {events?.map(event => (
-                        <Card key={event._id} className={`p-4 backdrop-blur-sm shadow-lg ${featured?.event_id === event._id ? 'bg-amber-50 border-amber-300 shadow-amber-200' : 'bg-slate-900/80 border-purple-500/30 shadow-purple-500/10'} border`}>
+                                <Card key={event._id} className={`p-4 backdrop-blur-sm shadow-lg ${featured?.event_id === event._id ? 'bg-amber-50 border-amber-300 shadow-amber-200' : 'bg-slate-900/80 border-purple-500/30 shadow-purple-500/10'} ${selectedIds.includes(event._id) ? 'ring-1 ring-purple-400/40' : ''} border`}>
                            <img src={resolveImageUrl(event.image)} alt={event.title} className="w-full h-32 object-cover rounded-md mb-4"/>
-                           <h3 className={`font-semibold ${featured?.event_id === event._id ? 'text-amber-900' : 'text-white'}`}>{event.title}</h3>
+                                    <h3 className={`font-semibold flex items-center gap-2 ${featured?.event_id === event._id ? 'text-amber-900' : 'text-white'}`}>{event.title}
+                                      {selectedIds.includes(event._id) && <span className="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-200">In Section</span>}
+                                    </h3>
                            <p className={`${featured?.event_id === event._id ? 'text-amber-700' : 'text-purple-300'} text-sm`}>{new Date(event.date).toLocaleDateString()}</p>
                            <div className="flex flex-wrap gap-2 mt-4">
                                 <Button 
@@ -354,15 +399,19 @@ const ManageEvents = () => {
                                 >
                                     <Edit className="h-4 w-4 mr-2" />Edit
                                 </Button>
-                                <Button 
-                                    variant="destructive" 
-                                    size="sm" 
-                                    onClick={() => deleteMutation.mutate(event._id)}
-                                    disabled={roleId > 3}
-                                    className="bg-red-900/80 border-red-700/30 text-red-300 hover:bg-red-900"
+                                <Button
+                                size="sm"
+                                onClick={() => deleteMutation.mutate(event._id)}
+                                disabled={roleId > 3}
+                                className="bg-red-600 text-white font-semibold px-3 py-1.5 rounded-md 
+                                            border border-red-700 shadow-md
+                                            hover:bg-red-700 hover:shadow-lg hover:scale-105
+                                            focus:outline-none focus:ring-2 focus:ring-red-400
+                                            active:scale-95 transition-all duration-200"
                                 >
-                                    <Trash2 className="h-4 w-4 mr-2" />Delete
+                                <Trash2 className="h-4 w-4 mr-2" /> Delete
                                 </Button>
+
                                 <Button
                                     variant={featured?.event_id === event._id ? 'default' : 'outline'}
                                     size="sm"
@@ -383,6 +432,15 @@ const ManageEvents = () => {
                                     Clear
                                   </Button>
                                 )}
+                                <Button
+                                    variant={selectedIds.includes(event._id) ? 'default' : 'outline'}
+                                    size="sm"
+                                    disabled={isReadOnly || saveSectionMutation.isPending}
+                                    onClick={() => toggleInSection(event._id)}
+                                    className={`${selectedIds.includes(event._id) ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'border-purple-300 text-purple-300 hover:bg-purple-900/50'}`}
+                                >
+                                    {mutatingEventId === event._id ? 'Saving...' : (selectedIds.includes(event._id) ? 'In Section' : 'Add to Section')}
+                                </Button>
                             </div>
                         </Card>
                     ))}
@@ -393,4 +451,3 @@ const ManageEvents = () => {
 };
 
 export default ManageEvents;
-

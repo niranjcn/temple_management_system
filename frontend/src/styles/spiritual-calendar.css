@@ -14,11 +14,39 @@
   
   .calendar-spiritual .rdp-table {
     font-size: 0.75rem;
+    border-collapse: separate;
+    border-spacing: 6px; /* add gaps between cells to reduce congestion */
   }
   
   .calendar-spiritual .rdp-head_cell {
     font-size: 0.65rem;
     padding: 0.25rem;
+  }
+
+  /* Provide a comfortable vertical scroll area on phones */
+  .calendar-container {
+    max-height: 70vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin; /* Firefox */
+  }
+  .calendar-container::-webkit-scrollbar {
+    width: 8px;
+    height: 6px;
+  }
+  .calendar-container::-webkit-scrollbar-thumb {
+    background: rgba(251, 146, 60, 0.5);
+    border-radius: 8px;
+  }
+  .calendar-container::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  /* Slightly larger tap areas and spacing to avoid crowding */
+  .calendar-spiritual .rdp-day {
+    margin: 6px;
+    min-height: 84px;
+    padding: 6px;
   }
 }
 

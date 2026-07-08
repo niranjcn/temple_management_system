@@ -11,8 +11,12 @@ class JWTSecurityService:
     def __init__(self):
         self.secret_key = os.getenv("SECRET_KEY")
         self.algorithm = os.getenv("ALGORITHM", "HS256")
-        self.access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 7))
-        self.refresh_token_expire_days = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
+        # Default to 1 day for web sessions
+        self.access_token_expire_minutes = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440))  # 1 day
+        self.refresh_token_expire_minutes = int(os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", 10080))  # 7 days
+        # Mobile app uses longer tokens - 180 days (6 months)
+        self.mobile_access_token_expire_minutes = int(os.getenv("MOBILE_ACCESS_TOKEN_EXPIRE_MINUTES", 259200))  # 180 days
+        self.mobile_refresh_token_expire_minutes = int(os.getenv("MOBILE_REFRESH_TOKEN_EXPIRE_MINUTES", 525600))  # 365 days
         self.audience = os.getenv("JWT_AUDIENCE", "https://vamana-temple.netlify.app")
         # Whether to bind tokens to client info (IP/UA). Disabled by default to avoid issues behind proxies.
         self.bind_to_client = os.getenv("JWT_BIND_TO_CLIENT", "false").lower() in {"1", "true", "yes"}
@@ -21,18 +25,26 @@ class JWTSecurityService:
         
         if not self.secret_key:
             raise ValueError("SECRET_KEY environment variable is required")
+        if self.access_token_expire_minutes <= 0:
+            raise ValueError("ACCESS_TOKEN_EXPIRE_MINUTES must be greater than zero")
+        if self.refresh_token_expire_minutes <= 0:
+            raise ValueError("REFRESH_TOKEN_EXPIRE_MINUTES must be greater than zero")
     
-    def create_access_token(self, data: dict, client_info: Optional[Dict[str, str]] = None) -> str:
-        """Create a short-lived JWT access token"""
+    def create_access_token(self, data: dict, client_info: Optional[Dict[str, str]] = None, is_mobile: bool = False) -> str:
+        """Create a JWT access token with device-specific expiration (longer for mobile)"""
         to_encode = data.copy()
-        expire = datetime.now(timezone.utc) + timedelta(minutes=self.access_token_expire_minutes)
+        
+        # Use extended expiration for mobile apps
+        expire_minutes = self.mobile_access_token_expire_minutes if is_mobile else self.access_token_expire_minutes
+        expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)
         
         # Add standard claims
         to_encode.update({
             "exp": expire,
             "iat": datetime.now(timezone.utc),
             "aud": self.audience,
-            "type": "access"
+            "type": "access",
+            "jti": secrets.token_hex(16),
         })
         
         # Add client binding for additional security (configurable)
@@ -44,10 +56,13 @@ class JWTSecurityService:
         
         return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
     
-    def create_refresh_token(self, data: dict, client_info: Optional[Dict[str, str]] = None) -> str:
-        """Create a long-lived JWT refresh token"""
+    def create_refresh_token(self, data: dict, client_info: Optional[Dict[str, str]] = None, is_mobile: bool = False) -> str:
+        """Create a JWT refresh token with device-specific expiration (longer for mobile)"""
         to_encode = data.copy()
-        expire = datetime.now(timezone.utc) + timedelta(days=self.refresh_token_expire_days)
+        
+        # Use extended expiration for mobile apps
+        expire_minutes = self.mobile_refresh_token_expire_minutes if is_mobile else self.refresh_token_expire_minutes
+        expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)
         
         # Add standard claims
         to_encode.update({
@@ -115,16 +130,26 @@ class JWTSecurityService:
             "user_agent": request.headers.get("user-agent", "")
         }
     
-    def refresh_access_token(self, refresh_token: str, client_info: Optional[Dict[str, str]] = None) -> str:
-        """Generate new access token using refresh token"""
-        # Verify refresh token
+    def refresh_access_token(self, refresh_token: str, client_info: Optional[Dict[str, str]] = None, is_mobile: bool = False) -> tuple[str, str]:
+        """Generate a new access token and rotated refresh token using the provided refresh token."""
         payload = self.verify_token(refresh_token, token_type="refresh", client_info=client_info)
-        
-        # Create new access token with same user data
-        user_data = {k: v for k, v in payload.items() 
-                    if k not in ["exp", "iat", "aud", "type", "jti", "client_hash"]}
-        
-        return self.create_access_token(user_data, client_info)
+
+        user_data = {
+            k: v for k, v in payload.items()
+            if k not in ["exp", "iat", "aud", "type", "jti", "client_hash"]
+        }
+
+        new_access_token = self.create_access_token(user_data, client_info, is_mobile=is_mobile)
+        new_refresh_token = self.create_refresh_token(user_data, client_info, is_mobile=is_mobile)
+        return new_access_token, new_refresh_token
+    
+    def get_token_duration(self, role_id: Optional[int] = None) -> int:
+        """Get access token duration in seconds."""
+        return self.access_token_expire_minutes * 60
+
+    def get_refresh_token_duration(self) -> int:
+        """Get refresh token duration in seconds."""
+        return self.refresh_token_expire_minutes * 60
 
 # Global instance
 jwt_security = JWTSecurityService()

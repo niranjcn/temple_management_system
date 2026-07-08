@@ -5,7 +5,11 @@ from fastapi import HTTPException, status
 from bson import ObjectId
 from ..database import calendar_collection, calendar_audit_collection
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 from ..models.calendar_models import CalendarDayPublic
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Simple in-memory cache for month payloads (can be replaced with Redis)
@@ -158,8 +162,8 @@ async def assign_malayalam_year_range(start_date: str, end_date: str, malayalam_
     if audit_ops:
         try:
             await calendar_audit_collection.bulk_write(audit_ops, ordered=False)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to write calendar audit logs: {e}")
 
     _invalidate_month_cache_for_range(s, e)
     return modified
@@ -198,12 +202,21 @@ async def upsert_day_naal(date_str: str, naal: Optional[str], actor: str, versio
 
     # Snapshot before
     before = await calendar_collection.find_one({"dateISO": d.isoformat()}, {"_id": 0})
-    res = await calendar_collection.find_one_and_update(
-        filter_q,
-        update_doc,
-        upsert=True,
-        return_document=ReturnDocument.AFTER
-    )
+    
+    try:
+        res = await calendar_collection.find_one_and_update(
+            filter_q,
+            update_doc,
+            upsert=True,
+            return_document=ReturnDocument.AFTER
+        )
+    except DuplicateKeyError:
+        # This happens when version mismatch prevents update and upsert tries to create duplicate
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, 
+            detail="Version conflict detected. The calendar entry was modified by another user. Please refresh and try again."
+        )
+    
     if res is None:
         # Likely version conflict
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Version conflict; please refresh and retry")
@@ -222,8 +235,8 @@ async def upsert_day_naal(date_str: str, naal: Optional[str], actor: str, versio
             "timestamp": now,
             "operation_id": str(ObjectId()),
         })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to create calendar audit entry: {e}")
 
     _invalidate_single(d.isoformat())
     return after
@@ -239,3 +252,145 @@ async def search_by_naal(naal: str, limit: int = 10, after: Optional[str] = None
         q["dateISO"] = {"$gte": after}
     cursor = calendar_collection.find(q).sort("dateISO", 1).limit(int(limit))
     return await cursor.to_list(int(limit))
+
+
+async def search_naal_in_date_range(naal: str, start_date: str, end_date: str) -> Optional[str]:
+    """
+    Search for a naal within a specific date range and return the first matching date.
+    Used for Nakshatrapooja bookings to map naal to actual dates.
+    
+    Args:
+        naal: The naal (birth star) to search for
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+    
+    Returns:
+        The first date (YYYY-MM-DD) where the naal occurs, or None if not found
+    """
+    try:
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date format; expected YYYY-MM-DD")
+    
+    if start > end:
+        raise HTTPException(status_code=400, detail="start_date must be <= end_date")
+    
+    # Query for the naal within the date range
+    query = {
+        "naal": naal,
+        "dateISO": {
+            "$gte": start.isoformat(),
+            "$lte": end.isoformat()
+        }
+    }
+    
+    # Find the first occurrence, sorted by date
+    result = await calendar_collection.find_one(query, {"dateISO": 1, "_id": 0}, sort=[("dateISO", 1)])
+    
+    if result:
+        return result.get("dateISO")
+    return None
+
+
+async def search_naal_yearly(naal: str, year: int) -> List[str]:
+    """
+    Search for a naal throughout an entire year and return all matching dates (one per month).
+    Used for Nakshatrapooja bookings with "this_year" option.
+    
+    Args:
+        naal: The naal (birth star) to search for
+        year: The year to search in
+    
+    Returns:
+        List of dates (YYYY-MM-DD) where the naal occurs, one per month
+    """
+    from dateutil.relativedelta import relativedelta
+    
+    monthly_dates = []
+    
+    # Search each month of the year
+    for month in range(1, 13):
+        try:
+            # First day of the month
+            start_of_month = date(year, month, 1)
+            # Last day of the month
+            end_of_month = start_of_month + relativedelta(months=1) - relativedelta(days=1)
+            
+            # Query for the naal in this month
+            query = {
+                "naal": naal,
+                "dateISO": {
+                    "$gte": start_of_month.isoformat(),
+                    "$lte": end_of_month.isoformat()
+                }
+            }
+            
+            # Find the first occurrence in this month
+            result = await calendar_collection.find_one(query, {"dateISO": 1, "_id": 0}, sort=[("dateISO", 1)])
+            
+            if result:
+                monthly_dates.append(result.get("dateISO"))
+        except Exception as e:
+            # Skip months that cause errors
+            logger.warning(f"Error searching for naal {naal} in month {year}-{month:02d}: {e}")
+            continue
+    
+    return monthly_dates
+
+
+async def search_naal_in_range_all(naal: str, start_date: str, end_date: str) -> List[str]:
+    """
+    Search for all occurrences of a naal within a date range (for custom ranges spanning multiple months).
+    Returns one date per month where the naal occurs.
+    
+    Args:
+        naal: The naal (birth star) to search for
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+    
+    Returns:
+        List of dates (YYYY-MM-DD) where the naal occurs, one per month in the range
+    """
+    from dateutil.relativedelta import relativedelta
+    
+    try:
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date format; expected YYYY-MM-DD")
+    
+    if start > end:
+        raise HTTPException(status_code=400, detail="start_date must be <= end_date")
+    
+    monthly_dates = []
+    current = start.replace(day=1)  # Start from first day of start month
+    
+    while current <= end:
+        # Calculate month boundaries
+        month_start = current
+        month_end = current + relativedelta(months=1) - relativedelta(days=1)
+        
+        # Don't go beyond the specified end date
+        if month_end > end:
+            month_end = end
+        
+        # Query for the naal in this month
+        query = {
+            "naal": naal,
+            "dateISO": {
+                "$gte": max(month_start, start).isoformat(),
+                "$lte": month_end.isoformat()
+            }
+        }
+        
+        # Find the first occurrence in this month
+        result = await calendar_collection.find_one(query, {"dateISO": 1, "_id": 0}, sort=[("dateISO", 1)])
+        
+        if result:
+            monthly_dates.append(result.get("dateISO"))
+        
+        # Move to next month
+        current = current + relativedelta(months=1)
+    
+    return monthly_dates

@@ -25,6 +25,7 @@ A comprehensive web application for managing temple operations, rituals, events,
 1. **Setup Environment Variables**
    - Copy `.env.example` to `.env` in both `backend/` and `frontend/` directories
    - Configure database URLs and API secret keys
+   - Set `CLOUDINARY_URL=cloudinary://<api_key>:<api_secret>@dmcras5t4` in `backend/.env` (and optionally override `CLOUDINARY_*_FOLDER` values) so media uploads use Cloudinary storage
 
 2. **Backend Setup**
    ```bash
@@ -44,6 +45,42 @@ A comprehensive web application for managing temple operations, rituals, events,
    - Frontend: http://localhost:5173
    - Backend API: http://localhost:8080
    - API Documentation: http://localhost:8080/docs
+
+## 📚 **Documentation**
+
+### Security & Best Practices
+- `backend/SECURITY_SUMMARY.md` - **Quick reference for security fixes**
+- `backend/SECURITY_FIXES_REPORT.md` - Detailed security audit report
+- `backend/CODING_STANDARDS.md` - Python coding standards and best practices
+- `JWT_SECURITY_IMPLEMENTATION.md` - Complete JWT security guide
+- `PRODUCTION_SECURITY.md` - Production security configuration
+
+### Deployment & API
+- `RENDER_NETLIFY_DEPLOYMENT.md` - Deployment instructions
+- `API_Security_Documentation.md` - Legacy security docs
+
+## 🛡️ **Security Audit Status**
+
+**Last Audit:** October 22, 2025  
+**Status:** ✅ Production Secure - Updates Available
+
+### Code Security (Completed ✅)
+| Category | Issues Found | Fixed | Status |
+|----------|--------------|-------|--------|
+| Critical (eval usage) | 2 | 2 | ✅ |
+| High (insecure random) | 1 | 1 | ✅ |
+| Medium (error handling) | 12 | 12 | ✅ |
+| **Total** | **15** | **15** | **✅** |
+
+### Dependency Security (Reviewed ✅)
+| Platform | Vulnerabilities | Production Impact | Status |
+|----------|-----------------|-------------------|--------|
+| Python (pip) | 1 Low | None (build-time only) | ⚠️ Monitor |
+| Node.js (vite/esbuild) | 2 Moderate | None (dev-time only) | ⚠️ Update Available |
+| **Production** | **0** | **None** | **✅ Secure** |
+
+See `DEPENDENCY_SECURITY_AUDIT.md` for detailed analysis.  
+See `backend/SECURITY_SUMMARY.md` for code security quick reference.
 
 ## 📚 **Documentation**
 

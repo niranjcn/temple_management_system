@@ -1,6 +1,8 @@
 // JWT Authentication Service for Frontend
 // Handles secure token management without exposing secret keys
 
+import { authEventBus } from './authEvents';
+
 interface TokenResponse {
   access_token: string;
   token_type: string;
@@ -57,32 +59,44 @@ class JWTAuthService {
    * Login with username and password
    */
   async login(username: string, password: string): Promise<boolean> {
-    try {
-      const formData = new URLSearchParams();
-      formData.append('username', username);
-      formData.append('password', password);
+    // Deprecated: password login disabled on server
+    throw new Error('Password login disabled. Use Google Sign-In.');
+  }
 
-      const response = await fetch(`${this.getApiBaseUrl()}/api/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        credentials: 'include', // Include cookies
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Login failed' }));
-        throw new Error(errorData.detail || 'Login failed');
-      }
-
-      const tokenData: TokenResponse = await response.json();
-      this.setTokens(tokenData);
-      return true;
-    } catch (error) {
-      console.error('Login failed:', error);
-      throw error;
+  /**
+   * Send OTP to mobile number
+   */
+  async sendOTP(mobileNumber: string): Promise<{ message: string; mobile_number: string; expires_in: number }> {
+    const response = await fetch(`${this.getApiBaseUrl()}/api/auth/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ mobile_number: mobileNumber }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: 'Failed to send OTP' }));
+      throw new Error(errorData.detail || 'Failed to send OTP');
     }
+    return await response.json();
+  }
+
+  /**
+   * Verify OTP and login
+   */
+  async verifyOTP(mobileNumber: string, otp: string): Promise<boolean> {
+    const response = await fetch(`${this.getApiBaseUrl()}/api/auth/verify-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ mobile_number: mobileNumber, otp: otp }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: 'Invalid OTP' }));
+      throw new Error(errorData.detail || 'Invalid OTP');
+    }
+    const tokenData: TokenResponse = await response.json();
+    this.setTokens(tokenData);
+    return true;
   }
 
   /**
@@ -99,6 +113,34 @@ class JWTAuthService {
       console.error('Logout request failed:', error);
     } finally {
       this.clearTokens();
+      
+      // Disconnect from Google to allow login with same account
+      this.disconnectFromGoogle();
+      
+      // Emit logout event
+      authEventBus.emit('logout');
+    }
+  }
+
+  /**
+   * Disconnect from Google Sign-In to allow re-login with same account
+   */
+  private disconnectFromGoogle(): void {
+    try {
+      const w = window as any;
+      if (w.google && w.google.accounts && w.google.accounts.id) {
+        // Disconnect from Google
+        w.google.accounts.id.disableAutoSelect();
+        
+        // Also try to revoke the authorization if available
+        if (w.google.accounts.oauth2) {
+          w.google.accounts.oauth2.revoke('', () => {
+            console.log('Google authorization revoked');
+          });
+        }
+      }
+    } catch (error) {
+      console.log('Google disconnect not available or failed:', error);
     }
   }
 
@@ -108,7 +150,13 @@ class JWTAuthService {
   async getAccessToken(): Promise<string | null> {
     // Check if token is expired or expiring soon (within 1 minute)
     if (this.tokenExpiry && this.tokenExpiry.getTime() - Date.now() < 60000) {
-      await this.refreshAccessToken();
+      try {
+        await this.refreshAccessToken();
+      } catch (error) {
+        // If refresh fails, token is invalid
+        console.error('Token refresh failed:', error);
+        return null;
+      }
     }
 
     return this.accessToken;
@@ -136,7 +184,14 @@ class JWTAuthService {
         credentials: 'include',
       });
 
-      if (!response.ok) return null;
+      if (!response.ok) {
+        if (response.status === 401) {
+          // Token expired or invalid
+          this.clearTokens();
+          authEventBus.emit('session-expired', { reason: 'token_verification_failed' });
+        }
+        return null;
+      }
 
       const data = await response.json();
       return data.user;
@@ -160,8 +215,9 @@ class JWTAuthService {
       });
 
       if (!response.ok) {
-        // Refresh token is invalid, clear tokens and redirect to login
+        // Refresh token is invalid, clear tokens and emit session expired event
         this.clearTokens();
+        authEventBus.emit('session-expired', { reason: 'refresh_token_expired' });
         throw new Error('Refresh token invalid');
       }
 
@@ -170,6 +226,7 @@ class JWTAuthService {
     } catch (error) {
       console.error('Token refresh failed:', error);
       this.clearTokens();
+      authEventBus.emit('session-expired', { reason: 'token_refresh_failed' });
       throw error;
     }
   }
@@ -252,8 +309,9 @@ class JWTAuthService {
    * Get API base URL from environment
    */
   private getApiBaseUrl(): string {
-    const viteEnv = (import.meta as any)?.env as { VITE_API_BASE_URL?: string } | undefined;
-    return viteEnv?.VITE_API_BASE_URL || 'https://temple-management-system-3p4x.onrender.com';
+    // Use the environment variable, fallback to a default for local dev
+    // return import.meta.env.VITE_API_BASE_URL || 'https://temple-management-system-3p4x.onrender.com';
+    return import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
   }
 }
 
